@@ -1,6 +1,5 @@
 #import "ControllerInput.h"
 #import "../LauncherPreferences.h"
-#import "../PLProfiles.h"
 #import "../SurfaceViewController.h"
 #import "../utils.h"
 
@@ -31,8 +30,7 @@ BOOL leftShiftHeld;
         return;
     }
     
-    NSString *controlFile = [PLProfiles resolveKeyForCurrentProfile:@"defaultGamepadCtrl"];
-    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads/%@", getenv("POJAV_HOME"), controlFile];
+    NSString *gamepadPath = [NSString stringWithFormat:@"%s/controlmap/gamepads/%@", getenv("POJAV_HOME"), getPreference(@"default_gamepad_ctrl")];
     NSMutableDictionary *gamepadJSON = parseJSONFromFile(gamepadPath);
     
     gameMap = gamepadJSON[@"mGameMappingList"];
@@ -104,15 +102,20 @@ BOOL leftShiftHeld;
     gamepad.rightTrigger.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
         [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_RIGHT_TRIGGER pressed:pressed];
     };
-    gamepad.buttonOptions.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
-        [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_BACK pressed:pressed];
-    };
-    gamepad.buttonMenu.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
-        [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_START pressed:pressed];
-    };
-    gamepad.buttonHome.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
-        [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_GUIDE pressed:pressed];
-    };
+
+    if (@available(iOS 13.0, *)) {
+        gamepad.buttonOptions.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+            [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_BACK pressed:pressed];
+        };
+        gamepad.buttonMenu.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+            [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_START pressed:pressed];
+        };
+    }
+    if (@available(iOS 14.0, *)) {
+        gamepad.buttonHome.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+            [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_GUIDE pressed:pressed];
+        };
+    }
 
     gamepad.buttonA.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
         [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_A pressed:pressed];
@@ -184,12 +187,14 @@ BOOL leftShiftHeld;
             lastYValue = yValue;
         }
     };
-    gamepad.leftThumbstickButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-        [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_LEFT_THUMB pressed:pressed];
-    };
-    gamepad.rightThumbstickButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-        [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_RIGHT_THUMB pressed:pressed];
-    };
+    if (@available(iOS 12.1, *)) {
+        gamepad.leftThumbstickButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
+            [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_LEFT_THUMB pressed:pressed];
+        };
+        gamepad.rightThumbstickButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
+            [self sendKeyEvent:GLFW_GAMEPAD_BUTTON_RIGHT_THUMB pressed:pressed];
+        };
+    }
 }
 
 /**
@@ -211,7 +216,7 @@ BOOL leftShiftHeld;
         deltaX *= deltaTimeScale;
         deltaY *= deltaTimeScale;
 
-        SurfaceViewController *vc = (id)UIWindow.mainWindow.rootViewController;
+        SurfaceViewController *vc = (id)(currentWindow().rootViewController);
         [vc sendTouchPoint:CGPointMake(deltaX, deltaY) withEvent:ACTION_MOVE_MOTION];
     }
     lastFrameTime = frameTime;
@@ -223,9 +228,13 @@ BOOL leftShiftHeld;
     gamepad.rightShoulder.pressedChangedHandler = nil;
     gamepad.leftTrigger.pressedChangedHandler = nil;
     gamepad.rightTrigger.pressedChangedHandler = nil;
-    gamepad.buttonOptions.pressedChangedHandler = nil;
-    gamepad.buttonMenu.pressedChangedHandler = nil;
-    gamepad.buttonHome.pressedChangedHandler = nil;
+    if (@available(iOS 13.0, *)) {
+        gamepad.buttonOptions.pressedChangedHandler = nil;
+        gamepad.buttonMenu.pressedChangedHandler = nil;
+    }
+    if (@available(iOS 14.0, *)) {
+        gamepad.buttonHome.pressedChangedHandler = nil;
+    }
     gamepad.buttonA.pressedChangedHandler = nil;
     gamepad.buttonB.pressedChangedHandler = nil;
     gamepad.buttonX.pressedChangedHandler = nil;
@@ -236,8 +245,10 @@ BOOL leftShiftHeld;
     gamepad.dpad.right.pressedChangedHandler = nil;
     gamepad.leftThumbstick.valueChangedHandler = nil;
     gamepad.rightThumbstick.valueChangedHandler = nil;
+    if (@available(iOS 12.1, *)) {
     gamepad.leftThumbstickButton.pressedChangedHandler = nil;
-    gamepad.rightThumbstickButton.pressedChangedHandler = nil;
+        gamepad.rightThumbstickButton.pressedChangedHandler = nil;
+    }
 }
 
 @end

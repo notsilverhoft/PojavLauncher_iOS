@@ -1,9 +1,7 @@
 #import <UIKit/UIKit.h>
-#import "UIKit+hook.h"
 
 #import "customcontrols/ControlLayout.h"
 #import "GameSurfaceView.h"
-#import "PLLogOutputView.h"
 
 BOOL canAppendToLog;
 dispatch_group_t fatalExitGroup;
@@ -21,16 +19,14 @@ CGPoint lastVirtualMousePoint;
 
 @property(nonatomic) UIView* rootView;
 
-- (instancetype)initWithMetadata:(NSDictionary *)metadata;
 - (void)sendTouchPoint:(CGPoint)location withEvent:(int)event;
 - (void)updateSavedResolution;
-- (void)updateGrabState;
 
-+ (GameSurfaceView *)surface;
 + (BOOL)isRunning;
 
 // LogView category
-@property(nonatomic) PLLogOutputView* logOutputView;
+@property(nonatomic) UITableView* logTableView;
+@property(nonatomic) UIView* logOutputView;
 
 // Navigation category
 @property(nonatomic) NSArray *menuArray;
@@ -47,6 +43,9 @@ CGPoint lastVirtualMousePoint;
 @end
 
 @interface SurfaceViewController(LogView)
+
++ (void)appendToLog:(NSString *)line;
++ (void)handleExitCode:(int)code;
 
 - (void)viewWillTransitionToSize_LogView:(CGRect)frame;
 

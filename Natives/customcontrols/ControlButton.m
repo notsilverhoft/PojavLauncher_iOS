@@ -1,11 +1,8 @@
 #import "ControlButton.h"
 #import "ControlLayout.h"
 #import "CustomControlsUtils.h"
-#import "NSPredicateUtilitiesExternal.h"
 #import "../LauncherPreferences.h"
 #import "../utils.h"
-
-#import <objc/runtime.h>
 
 #define MIN_DISTANCE 8.0
 
@@ -14,22 +11,10 @@
 
 @implementation ControlButton
 
-+ (void)load {
-    Class NSPredicateUtilities = objc_getMetaClass("_NSPredicateUtilities");
-
-    unsigned int count;
-    Method *list = class_copyMethodList(object_getClass(NSPredicateUtilitiesExternal.class), &count);
-    for (int i = 0; i < count; i++) {
-        Method method = list[i];
-        class_addMethod(NSPredicateUtilities, method_getName(method), method_getImplementation(method), method_getTypeEncoding(method));
-    }
-}
-
 + (id)buttonWithProperties:(NSMutableDictionary *)propArray {
     //NSLog(@"DBG button prop = %@", propArray);
     ControlButton *instance = [self buttonWithType:UIButtonTypeSystem];
     instance.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    instance.clipsToBounds = YES;
     instance.tintColor = [UIColor whiteColor];
     instance.titleLabel.adjustsFontSizeToFitWidth = YES;
     instance.titleLabel.lineBreakMode = NSLineBreakByCharWrapping;
@@ -89,7 +74,7 @@
 
 - (void)preProcessProperties {
     CGFloat currentScale = [((ControlLayout *)self.superview).layoutDictionary[@"scaledAt"] floatValue];
-    CGFloat savedScale = getPrefFloat(@"control.button_scale");
+    CGFloat savedScale = [getPreference(@"button_scale") floatValue];
     if (currentScale != savedScale) {
         self.properties[@"width"] = @([self.properties[@"width"] floatValue] * savedScale / currentScale);
         self.properties[@"height"] = @([self.properties[@"height"] floatValue] * savedScale / currentScale);
@@ -98,12 +83,12 @@
 
 - (NSString *)processFunctions:(NSString *)string {
     NSString *tmpStr;
-    CGFloat screenScale = UIScreen.mainScreen.scale;
+    CGFloat screenScale = [[UIScreen mainScreen] scale];
 
-    // FIXME: on certain iOS versions, we cannot invoke dp: and px: in _NSPredicateUtilities
-    // we gotta do direct replaces here
+    // Since NSExpression doesn't support calling as "custom_function(parameter)", we do direct replaces here
 
     // float dp(float px) => px / screenScale
+    // Without a state machine to do "px / screenScale", just do "1 / screenScale * px" :)
     tmpStr = [string stringByReplacingOccurrencesOfString:@"dp(" withString:[NSString stringWithFormat:@"(1.0 / %f * ", screenScale]];
 
     // float px(float dp) => screenScale * dp
@@ -132,15 +117,14 @@
     INSERT_VALUE("screen_width", ([NSString stringWithFormat:@"%f", screenWidth]));
     INSERT_VALUE("screen_height", ([NSString stringWithFormat:@"%f", screenHeight]));
     INSERT_VALUE("margin", ([NSString stringWithFormat:@"%f", 2.0 * screenScale]));
-    INSERT_VALUE("preferred_scale", ([NSString stringWithFormat:@"%f", getPrefFloat(@"control.button_scale")]));
+    INSERT_VALUE("preferred_scale", ([NSString stringWithFormat:@"%f", [getPreference(@"button_scale") floatValue]]));
 
     string = [self processFunctions:string];
     // NSLog(@"After insert: %@", string);
 
     // Calculate, since the dynamic position contains some math equations
     NSExpression *expression = [NSExpression expressionWithFormat:string];
-    NSDictionary<NSString*, NSNumber*> *variables = @{@"pi": @(M_PI)};
-    return [[expression expressionValueWithObject:variables context:nil] floatValue] / screenScale;
+    return [[expression expressionValueWithObject:nil context:nil] floatValue] / screenScale;
 }
 
 // NOTE: Unlike Android's impl, this method uses dp instead of px (no call to dpToPx)
@@ -167,9 +151,6 @@
 
 - (void)update {
     NSAssert(self.superview != nil, @"should not be nil");
-
-    self.displayInGame = [self.properties[@"displayInGame"] boolValue];
-    self.displayInMenu = [self.properties[@"displayInMenu"] boolValue];
 
     // net/kdt/pojavlaunch/customcontrols/ControlData.update()
     [self preProcessProperties];
@@ -199,12 +180,10 @@
 
     self.layer.borderColor = [convertARGB2UIColor(propStrokeColor) CGColor];
     self.layer.cornerRadius = MIN(self.frame.size.width, self.frame.size.height) / 200.0 * propCornerRadius;
-    self.layer.borderWidth = propStrokeWidth;
+    self.layer.borderWidth = MAX(self.frame.size.width, self.frame.size.height) / 200.0 * propStrokeWidth;
+    self.clipsToBounds = YES;
 
-    [UIView performWithoutAnimation:^{
-        [self setTitle:self.properties[@"name"] forState:UIControlStateNormal];
-        [self layoutIfNeeded];
-    }];
+    [self setTitle:self.properties[@"name"] forState:UIControlStateNormal];
 }
 
 // NOTE: Unlike Android's impl, this method uses dp instead of px (no call to dpToPx), "view.center" instead of "view.pos + view.size/2"
@@ -326,9 +305,9 @@
     NSString *str = [equation stringByReplacingOccurrencesOfString:@"${right}" withString:@"(${screen_width} - ${width})"];
     str = [str stringByReplacingOccurrencesOfString:@"${bottom}" withString:@"(${screen_height} - ${height})"];
     // "(px(" + Tools.pxToDp(button.getProperties().getHeight()) + ") /" + PREF_BUTTONSIZE + " * ${preferred_scale})"
-    str = [str stringByReplacingOccurrencesOfString:@"${height}" withString:[NSString stringWithFormat:@"(px(%f) / %f * ${preferred_scale})", button.frame.size.height, getPrefFloat(@"control.button_scale")]];
+    str = [str stringByReplacingOccurrencesOfString:@"${height}" withString:[NSString stringWithFormat:@"(px(%f) / %f * ${preferred_scale})", button.frame.size.height, [getPreference(@"button_scale") floatValue]]];
     // "(px(" + Tools.pxToDp(button.getProperties().getWidth()) + ") / " + PREF_BUTTONSIZE + " * ${preferred_scale})"
-    str = [str stringByReplacingOccurrencesOfString:@"${width}" withString:[NSString stringWithFormat:@"(px(%f) / %f * ${preferred_scale})", button.frame.size.width, getPrefFloat(@"control.button_scale")]];
+    str = [str stringByReplacingOccurrencesOfString:@"${width}" withString:[NSString stringWithFormat:@"(px(%f) / %f * ${preferred_scale})", button.frame.size.width, [getPreference(@"button_scale") floatValue]]];
     return str;
 }
 

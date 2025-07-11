@@ -1,6 +1,5 @@
 #import "CustomControlsViewController.h"
 #import "customcontrols/ControlDrawer.h"
-#import "customcontrols/ControlJoystick.h"
 #import "customcontrols/ControlLayout.h"
 #import "utils.h"
 
@@ -9,7 +8,7 @@
 - (void)doAddButton:(ControlButton *)button atIndex:(NSNumber *)index {
     NSUndoManager *undo = self.undoManager;
 
-    if ([button isKindOfClass:ControlSubButton.class]) {
+    if ([button isKindOfClass:[ControlSubButton class]]) {
         undo.actionName = localize(@"custom_controls.button_menu.add_subbutton", nil);
 
         [self.ctrlView addSubview:button];
@@ -17,17 +16,13 @@
         [drawer.buttons insertObject:button atIndex:index.intValue]; 
         [drawer.drawerData[@"buttonProperties"] insertObject:button.properties atIndex:index.intValue];
         [drawer syncButtons];
-    } else if ([button isKindOfClass:ControlDrawer.class]) {
+    } else if ([button isKindOfClass:[ControlDrawer class]]) {
         undo.actionName = localize(@"custom_controls.control_menu.add_drawer", nil);
 
         for (ControlSubButton *subButton in ((ControlDrawer *)button).buttons) {
             [self.ctrlView addSubview:subButton];
         }
         [self.ctrlView.layoutDictionary[@"mDrawerDataList"] insertObject:((ControlDrawer *)button).drawerData atIndex:index.intValue];
-        [self.ctrlView addSubview:button];
-    } else if ([button isKindOfClass:ControlJoystick.class]) {
-        undo.actionName = localize(@"custom_controls.control_menu.add_joystick", nil);
-        [self.ctrlView.layoutDictionary[@"mJoystickDataList"] insertObject:button.properties atIndex:index.intValue];
         [self.ctrlView addSubview:button];
     } else {
         undo.actionName = localize(@"custom_controls.control_menu.add_button", nil);
@@ -43,20 +38,17 @@
 
 - (void)doRemoveButton:(ControlButton *)button {
     NSNumber *index;
-    if ([button isKindOfClass:ControlSubButton.class]) {
+    if ([button isKindOfClass:[ControlSubButton class]]) {
         ControlDrawer *parent = ((ControlSubButton *)button).parentDrawer;
         index = @([parent.drawerData[@"buttonProperties"] indexOfObject:button.properties]);
         [parent.buttons removeObject:button];
         [parent.drawerData[@"buttonProperties"] removeObject:button.properties];
         [parent syncButtons];
-    } else if ([button isKindOfClass:ControlDrawer.class]) {
+    } else if ([button isKindOfClass:[ControlDrawer class]]) {
         ControlDrawer *drawer = (ControlDrawer *)button;
         index = @([self.ctrlView.layoutDictionary[@"mDrawerDataList"] indexOfObject:drawer.drawerData]);
         [drawer.buttons makeObjectsPerformSelector:@selector(removeFromSuperview)];
         [self.ctrlView.layoutDictionary[@"mDrawerDataList"] removeObject:drawer.drawerData];
-    } else if ([button isKindOfClass:ControlJoystick.class]) {
-        index = @([self.ctrlView.layoutDictionary[@"mJoystickDataList"] indexOfObject:button.properties]);
-        [self.ctrlView.layoutDictionary[@"mJoystickDataList"] removeObject:button.properties];
     } else {
         index = @([self.ctrlView.layoutDictionary[@"mControlDataList"] indexOfObject:button.properties]);
         [self.ctrlView.layoutDictionary[@"mControlDataList"] removeObject:button.properties];

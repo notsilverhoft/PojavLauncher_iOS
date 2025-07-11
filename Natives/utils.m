@@ -23,7 +23,7 @@ BOOL getEntitlementValue(NSString *key) {
 }
 
 BOOL isJITEnabled(BOOL checkCSFlags) {
-    if (!checkCSFlags && (getEntitlementValue(@"dynamic-codesigning") || isJailbroken)) {
+    if (!checkCSFlags && (getEntitlementValue(@"dynamic-codesigning") || getenv("POJAV_DETECTEDJB"))) {
         return YES;
     }
 
@@ -33,7 +33,8 @@ BOOL isJITEnabled(BOOL checkCSFlags) {
 }
 
 void openLink(UIViewController* sender, NSURL* link) {
-    if (NSClassFromString(@"SFSafariViewController") == nil) {
+    void *framework = dlopen("/System/Library/Frameworks/SafariServices.framework/SafariServices", RTLD_GLOBAL);
+    if (framework == nil) {
         NSData *data = [link.absoluteString dataUsingEncoding:NSUTF8StringEncoding];
         CIFilter *filter = [CIFilter filterWithName:@"CIQRCodeGenerator"];
         [filter setValue:data forKey:@"inputMessage"];
@@ -57,7 +58,7 @@ void openLink(UIViewController* sender, NSURL* link) {
         [alert addAction:doneAction];
         [sender presentViewController:alert animated:YES completion:nil];
     } else {
-        SFSafariViewController *vc = [[SFSafariViewController alloc] initWithURL:link];
+        SFSafariViewController *vc = [[NSClassFromString(@"SFSafariViewController ") alloc] initWithURL:link];
         [sender presentViewController:vc animated:YES completion:nil];
     }
 }
@@ -68,14 +69,14 @@ NSMutableDictionary* parseJSONFromFile(NSString *path) {
     NSString *content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&error];
     if (content == nil) {
         NSLog(@"[ParseJSON] Error: could not read %@: %@", path, error.localizedDescription);
-        return @{@"NSErrorObject": error}.mutableCopy;
+        return [@{@"error": error} mutableCopy];
     }
 
     NSData* data = [content dataUsingEncoding:NSUTF8StringEncoding];
     NSMutableDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&error];
     if (error) {
         NSLog(@"[ParseJSON] Error: could not parse JSON: %@", error.localizedDescription);
-        return @{@"NSErrorObject": error}.mutableCopy;
+        return [@{@"error": error} mutableCopy];
     }
     return dict;
 }
@@ -113,12 +114,13 @@ void customNSLog(const char *file, int lineNumber, const char *functionName, NSS
 {
     va_list ap; 
     va_start (ap, format);
-    NSString *body = [[NSString alloc] initWithFormat:format arguments:ap];
-    printf("%s", [body UTF8String]);
-    if (![format hasSuffix:@"\n"]) {
-        printf("\n");
+    if (![format hasSuffix: @"\n"])
+    {
+        format = [format stringByAppendingString: @"\n"];
     }
+    NSString *body = [[NSString alloc] initWithFormat:format arguments:ap];
     va_end (ap);
+    fprintf(stderr, "%s", [body UTF8String]);
 }
 
 CGFloat MathUtils_dist(CGFloat x1, CGFloat y1, CGFloat x2, CGFloat y2) {
@@ -132,6 +134,9 @@ CGFloat MathUtils_map(CGFloat x, CGFloat in_min, CGFloat in_max, CGFloat out_min
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+void _CGDataProviderReleaseBytePointerCallback(void *info,const void *pointer) {
+}
+
 CGFloat dpToPx(CGFloat dp) {
     CGFloat screenScale = [[UIScreen mainScreen] scale];
     return dp * screenScale;
@@ -143,9 +148,20 @@ CGFloat pxToDp(CGFloat px) {
 }
 
 void setButtonPointerInteraction(UIButton *button) {
-    button.pointerInteractionEnabled = YES;
-    button.pointerStyleProvider = ^ UIPointerStyle* (UIButton* button, UIPointerEffect* proposedEffect, UIPointerShape* proposedShape) {
-        UITargetedPreview *preview = [[UITargetedPreview alloc] initWithView:button];
-        return [NSClassFromString(@"UIPointerStyle") styleWithEffect:[NSClassFromString(@"UIPointerHighlightEffect") effectWithPreview:preview] shape:proposedShape];
-    };
+    if(@available (iOS 13.4, *)) {
+        button.pointerInteractionEnabled = YES;
+        button.pointerStyleProvider = ^ UIPointerStyle* (UIButton* button, UIPointerEffect* proposedEffect, UIPointerShape* proposedShape) {
+            UITargetedPreview *preview = [[UITargetedPreview alloc] initWithView:button];
+            return [UIPointerStyle styleWithEffect:[UIPointerHighlightEffect effectWithPreview:preview] shape:proposedShape];
+        };
+    }
 }
+
+void setViewBackgroundColor(UIView* view) {
+    if(@available(iOS 13.0, *)) {
+        view.backgroundColor = UIColor.systemBackgroundColor;
+    } else {
+        view.backgroundColor = UIColor.whiteColor;
+    }
+}
+

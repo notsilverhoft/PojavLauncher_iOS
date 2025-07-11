@@ -1,4 +1,3 @@
-#import <Security/Security.h>
 #import "BaseAuthenticator.h"
 #import "../LauncherPreferences.h"
 #import "../ios_uikit_bridge.h"
@@ -10,7 +9,7 @@ static BaseAuthenticator *current = nil;
 
 + (id)current {
     if (current == nil) {
-        [self loadSavedName:getPrefObject(@"internal.selected_account")];
+        [self loadSavedName:getPreference(@"selected_account")];
     }
     return current;
 }
@@ -21,15 +20,14 @@ static BaseAuthenticator *current = nil;
 
 + (id)loadSavedName:(NSString *)name {
     NSMutableDictionary *authData = parseJSONFromFile([NSString stringWithFormat:@"%s/accounts/%@.json", getenv("POJAV_HOME"), name]);
-    if (authData[@"NSErrorObject"] != nil) {
-        NSError *error = ((NSError *)authData[@"NSErrorObject"]);
+    if (authData[@"error"] != nil) {
+        NSError *error = ((NSError *)authData[@"error"]);
         if (error.code != NSFileReadNoSuchFileError) {
-            showDialog(localize(@"Error", nil), error.localizedDescription);
+            showDialog(currentVC(), localize(@"Error", nil), error.localizedDescription);
         }
         return nil;
     }
-
-    if ([authData[@"expiresAt"] longValue] == 0) {
+    if ([authData[@"accessToken"] length] < 5) {
         return [[LocalAuthenticator alloc] initWithData:authData];
     } else { 
         return [[MicrosoftAuthenticator alloc] initWithData:authData];
@@ -71,7 +69,7 @@ static BaseAuthenticator *current = nil;
     error = saveJSONToFile(self.authData, newPath);
 
     if (error != nil) {
-        showDialog(@"Error while saving file", error.localizedDescription);
+        showDialog(currentVC(), @"Error while saving file", error.localizedDescription);
     }
     return error == nil;
 }

@@ -1,22 +1,22 @@
 #import <Foundation/Foundation.h>
-#import "PLLogOutputView.h"
 #import "SurfaceViewController.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 
+#include <dlfcn.h>
 #include "external/fishhook/fishhook.h"
 
 void (*orig_abort)();
-void (*orig_exit)(int code);
 void* (*orig_dlopen)(const char* path, int mode);
+void (*orig_exit)(int code);
 int (*orig_open)(const char *path, int oflag, ...);
 
 void handle_fatal_exit(int code) {
-    if (NSThread.isMainThread) {
+    if (NSThread.isMainThread || !SurfaceViewController.isRunning) {
         return;
     }
 
-    [PLLogOutputView handleExitCode:code];
+    [SurfaceViewController handleExitCode:code];
 
     if (fatalExitGroup != nil) {
         // Likely other threads are crashing, put them to sleep
@@ -33,41 +33,35 @@ void hooked_abort() {
     orig_abort();
 }
 
-void hooked___assert_rtn(const char* func, const char* file, int line, const char* failedexpr)
-{
-    if (func == NULL) {
-        fprintf(stderr, "Assertion failed: (%s), file %s, line %d.\n", failedexpr, file, line);
-    } else {
-        fprintf(stderr, "Assertion failed: (%s), function %s, file %s, line %d.\n", failedexpr, func, file, line);
+void* hooked_dlopen(const char* path, int mode) {
+    // iOS 12 refuses to dlopen executables, so here we put a workaround
+    if (path == NULL || [@(path) hasSuffix:@"/PojavLauncher"]) {
+        return orig_dlopen(NULL, mode);
     }
-    hooked_abort();
+
+    // NOTE: no longer used, if jre has Pojav's libawt_xawt
+    if (getenv("POJAV_PREFER_EXTERNAL_JRE") && [@(path) hasSuffix:@"/libawt_xawt.dylib"]) {
+        // In this environment, libawt_xawt is not available/X11 only.
+        // hook dlopen to use our libawt_xawt
+        return orig_dlopen([NSString stringWithFormat:@"%s/Frameworks/libawt_xawt.dylib", getenv("BUNDLE_PATH")].UTF8String, mode);
+    }
+    
+    return orig_dlopen(path, mode);
 }
 
 void hooked_exit(int code) {
     NSLog(@"exit(%d) called", code);
     if (code == 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [UIApplication.sharedApplication performSelector:@selector(suspend)];
-        });
-        usleep(100*1000);
-        orig_exit(0);
+        orig_exit(code);
         return;
     }
     handle_fatal_exit(code);
 
-    orig_exit(code);
-}
-
-void* hooked_dlopen(const char* path, int mode) {
-    const char *home = getenv("HOME");
-    // Only proceed to check if dylib is in the home dir
-    char fullpath[PATH_MAX];
-    if (!path || !realpath(path, fullpath) || !strstr(fullpath, home)) {
-        return orig_dlopen(path, mode);
+    if (runtimeJavaVMPtr != NULL) {
+        (*runtimeJavaVMPtr)->DestroyJavaVM(runtimeJavaVMPtr);
     }
 
-    PLPatchMachOPlatformForFile(path);
-    return orig_dlopen(path, mode);
+    orig_exit(code);
 }
 
 int hooked_open(const char *path, int oflag, ...) {
@@ -83,12 +77,19 @@ int hooked_open(const char *path, int oflag, ...) {
 }
 
 void init_hookFunctions() {
-    struct rebinding rebindings[] = (struct rebinding[]){
+    void *orig_dlopen_local;
+    if (@available(iOS 14, *)) {
+        // Skip hooking dlopen
+    } else {
+        rebind_symbols((struct rebinding[1]){
+            {"dlopen", hooked_dlopen, (void *)&orig_dlopen_local}
+        }, 1);
+    }
+    rebind_symbols((struct rebinding[3]){
         {"abort", hooked_abort, (void *)&orig_abort},
-        {"__assert_rtn", hooked___assert_rtn, NULL},
         {"exit", hooked_exit, (void *)&orig_exit},
-        {"dlopen", hooked_dlopen, (void *)&orig_dlopen},
         {"open", hooked_open, (void *)&orig_open}
-    };
-    rebind_symbols(rebindings, sizeof(rebindings)/sizeof(struct rebinding));
+    }, 3);
+    // workaround weird pointer overwritten issue in jre 17.0.7
+    orig_dlopen = orig_dlopen_local;
 }

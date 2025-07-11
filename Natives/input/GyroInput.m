@@ -9,14 +9,16 @@
 static CGFloat lastXValue, lastYValue, lastFrameTime;
 static CGFloat gyroSensitivity;
 static int gyroInvertX;
-static BOOL gyroInvertAxis, gyroSwapAxis;
+static BOOL gyroSwapAxis;
 static CMMotionManager* cmInstance;
 
 + (void)updateOrientation {
-    UIInterfaceOrientation orientation = UIApplication.sharedApplication.windows[0].windowScene.interfaceOrientation;
-    gyroInvertAxis =
-        orientation==UIInterfaceOrientationPortraitUpsideDown ||
-        orientation==UIInterfaceOrientationLandscapeLeft;
+    UIInterfaceOrientation orientation;
+    if (@available(iOS 13.0, *)) {
+        orientation = UIApplication.sharedApplication.windows[0].windowScene.interfaceOrientation;
+    } else {
+        orientation = UIApplication.sharedApplication.statusBarOrientation;
+    }
     gyroSwapAxis = UIInterfaceOrientationIsPortrait(orientation);
     // FIXME: camera jumps upon rotating screen
 }
@@ -51,18 +53,15 @@ static CMMotionManager* cmInstance;
     }
 
     // 100% sensitivity -> 1:1 ratio between real world and ingame camera
-    if (gyroInvertAxis) {
-        factor *= -1;
-    }
     if (gyroSwapAxis) {
-        lastXValue = cmInstance.deviceMotion.rotationRate.y / (M_PI*90) * windowWidth * factor * gyroInvertX;
-        lastYValue = -cmInstance.deviceMotion.rotationRate.x / (M_PI*180) * windowHeight * factor;
+        lastXValue = cmInstance.deviceMotion.rotationRate.y / (M_PI*180) * windowWidth * factor * gyroInvertX;
+        lastYValue = -cmInstance.deviceMotion.rotationRate.x / (M_PI*360) * windowHeight * factor;
     } else {
-        lastXValue = cmInstance.deviceMotion.rotationRate.x / (M_PI*180) * windowWidth * factor * gyroInvertX;
-        lastYValue = cmInstance.deviceMotion.rotationRate.y / (M_PI*90) * windowHeight * factor;
+        lastXValue = cmInstance.deviceMotion.rotationRate.x / (M_PI*360) * windowWidth * factor * gyroInvertX;
+        lastYValue = cmInstance.deviceMotion.rotationRate.y / (M_PI*180) * windowHeight * factor;
     }
 
-    SurfaceViewController *vc = (id)UIWindow.mainWindow.rootViewController;
+    SurfaceViewController *vc = (id)(currentWindow().rootViewController);
     [vc sendTouchPoint:CGPointMake(lastXValue, lastYValue) withEvent:ACTION_MOVE_MOTION];
 
     lastFrameTime = frameTime;

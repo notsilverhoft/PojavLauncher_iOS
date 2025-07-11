@@ -7,8 +7,6 @@
 #import "LauncherNewsViewController.h"
 #import "LauncherPreferences.h"
 #import "LauncherPreferencesViewController.h"
-#import "LauncherProfilesViewController.h"
-#import "PLProfiles.h"
 #import "UIButton+AFNetworking.h"
 #import "UIImageView+AFNetworking.h"
 #import "UIKit+hook.h"
@@ -27,22 +25,11 @@
     return item;
 }
 
-+ (LauncherMenuCustomItem *)vcClass:(Class)class {
-    id vc = [class new];
-    LauncherMenuCustomItem *item = [[LauncherMenuCustomItem alloc] init];
-    item.title = [vc title];
-    item.imageName = [vc imageName];
-    // View controllers are put into an array to keep its state
-    item.vcArray = @[vc];
-    return item;
-}
-
 @end
 
 @interface LauncherMenuViewController()
-@property(nonatomic) NSMutableArray<LauncherMenuCustomItem*> *options;
+@property(nonatomic) NSMutableArray<UIViewController*> *options;
 @property(nonatomic) UILabel *statusLabel;
-@property(nonatomic) int lastSelectedIndex;
 @end
 
 @implementation LauncherMenuViewController
@@ -53,106 +40,104 @@
     [super viewDidLoad];
     
     self.isInitialVc = YES;
-    
+
     UIImageView *titleView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"AppLogo"]];
     [titleView setContentMode:UIViewContentModeScaleAspectFit];
     self.navigationItem.titleView = titleView;
     [titleView sizeToFit];
-    
-    self.options = @[
-        [LauncherMenuCustomItem vcClass:LauncherNewsViewController.class],
-        [LauncherMenuCustomItem vcClass:LauncherProfilesViewController.class],
-        [LauncherMenuCustomItem vcClass:LauncherPreferencesViewController.class],
-    ].mutableCopy;
+
+    // View controllers are put into an array to keep its state
+    self.options = NSMutableArray.new;
+    [self.options addObject:LauncherNewsViewController.new];
+    self.options[0].title = localize(@"News", nil);
+    [self.options addObject:LauncherPreferencesViewController.new];
+    self.options[1].title = localize(@"Settings", nil);
     if (realUIIdiom != UIUserInterfaceIdiomTV) {
         [self.options addObject:(id)[LauncherMenuCustomItem
-                                     title:localize(@"launcher.menu.custom_controls", nil)
-                                     imageName:@"MenuCustomControls" action:^{
+            title:localize(@"launcher.menu.custom_controls", nil)
+            imageName:@"MenuCustomControls" action:^{
             [contentNavigationController performSelector:@selector(enterCustomControls)];
         }]];
     }
     [self.options addObject:
-     (id)[LauncherMenuCustomItem
-          title:localize(@"launcher.menu.execute_jar", nil)
-          imageName:@"MenuInstallJar" action:^{
-        [contentNavigationController performSelector:@selector(enterModInstaller)];
-    }]];
-    
+        (id)[LauncherMenuCustomItem
+            title:localize(@"launcher.menu.install_jar", nil)
+            imageName:@"MenuInstallJar" action:^{
+            [contentNavigationController performSelector:@selector(enterModInstaller)];
+        }]];
+
     // TODO: Finish log-uploading service integration
     [self.options addObject:
-     (id)[LauncherMenuCustomItem
-          title:localize(@"login.menu.sendlogs", nil)
-          imageName:@"square.and.arrow.up" action:^{
-        NSString *latestlogPath = [NSString stringWithFormat:@"file://%s/latestlog.old.txt", getenv("POJAV_HOME")];
-        NSLog(@"Path is %@", latestlogPath);
-        UIActivityViewController *activityVC;
-        if (realUIIdiom != UIUserInterfaceIdiomTV) {
-            activityVC = [[UIActivityViewController alloc]
-                          initWithActivityItems:@[[NSURL URLWithString:latestlogPath]]
-                          applicationActivities:nil];
-        } else {
-            dlopen("/System/Library/PrivateFrameworks/SharingUI.framework/SharingUI", RTLD_GLOBAL);
-            activityVC =
-            [[NSClassFromString(@"SFAirDropSharingViewControllerTV") alloc]
-             performSelector:@selector(initWithSharingItems:)
-             withObject:@[[NSURL URLWithString:latestlogPath]]];
-        }
-        activityVC.popoverPresentationController.sourceView = titleView;
-        activityVC.popoverPresentationController.sourceRect = titleView.bounds;
-        [self presentViewController:activityVC animated:YES completion:nil];
-    }]];
-    
+        (id)[LauncherMenuCustomItem
+            title:localize(@"login.menu.sendlogs", nil)
+            imageName:@"square.and.arrow.up" action:^{
+            NSString *latestlogPath = [NSString stringWithFormat:@"file://%s/latestlog.old.txt", getenv("POJAV_HOME")];
+            NSLog(@"Path is %@", latestlogPath);
+            UIActivityViewController *activityVC;
+            if (realUIIdiom != UIUserInterfaceIdiomTV) {
+                activityVC = [[UIActivityViewController alloc]
+                    initWithActivityItems:@[@"latestlog.txt", [NSURL URLWithString:latestlogPath]]
+                    applicationActivities:nil];
+            } else {
+                dlopen("/System/Library/PrivateFrameworks/SharingUI.framework/SharingUI", RTLD_GLOBAL);
+                activityVC =
+                    [[NSClassFromString(@"SFAirDropSharingViewControllerTV") alloc]
+                    performSelector:@selector(initWithSharingItems:)
+                    withObject:@[[NSURL URLWithString:latestlogPath]]];
+            }
+            activityVC.popoverPresentationController.sourceView = titleView;
+            activityVC.popoverPresentationController.sourceRect = titleView.bounds;
+            [self presentViewController:activityVC animated:YES completion:nil];
+        }]];
+
     NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
     dateFormatter.dateFormat = @"MM-dd";
     NSString* date = [dateFormatter stringFromDate:NSDate.date];
     if([date isEqualToString:@"06-29"] || [date isEqualToString:@"06-30"] || [date isEqualToString:@"07-01"]) {
         [self.options addObject:(id)[LauncherMenuCustomItem
-                                     title:@"Technoblade never dies!"
-                                     imageName:@"" action:^{
+            title:@"Technoblade never dies!"
+            imageName:@"" action:^{
             openLink(self, [NSURL URLWithString:@"https://youtu.be/DPMluEVUqS0"]);
         }]];
     }
-    
+
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    
+
     self.navigationController.toolbarHidden = NO;
-    UIActivityIndicatorViewStyle indicatorStyle = UIActivityIndicatorViewStyleMedium;
+    UIActivityIndicatorViewStyle indicatorStyle;
+    if (@available(iOS 13.0, *)) {
+        indicatorStyle = UIActivityIndicatorViewStyleMedium;
+    } else {
+        indicatorStyle = UIActivityIndicatorViewStyleGray;
+    }
     UIActivityIndicatorView *toolbarIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:indicatorStyle];
     [toolbarIndicator startAnimating];
     self.toolbarItems = @[
         [[UIBarButtonItem alloc] initWithCustomView:toolbarIndicator],
         [[UIBarButtonItem alloc] init]
     ];
-    self.toolbarItems[1].tintColor = UIColor.labelColor;
-    
+    if (@available(iOS 13.0, *)) {
+        self.toolbarItems[1].tintColor = UIColor.labelColor;
+    } else {
+        self.toolbarItems[1].tintColor = UIColor.blackColor;
+    }
+
     // Setup the account button
     self.accountBtnItem = [self drawAccountButton];
-    
+
     [self updateAccountInfo];
-    
+
     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:0];
     [self.tableView selectRowAtIndexPath:indexPath animated:YES scrollPosition:UITableViewScrollPositionNone];
     [self tableView:self.tableView didSelectRowAtIndexPath:indexPath];
     
-    if (getEntitlementValue(@"get-task-allow")) {
-        [self displayProgress:localize(@"login.jit.checking", nil)];
+    if (!getEntitlementValue(@"dynamic-codesigning")) {
         if (isJITEnabled(false)) {
             [self displayProgress:localize(@"login.jit.enabled", nil)];
             [self displayProgress:nil];
         } else {
-            [self enableJITWithAltKit];
+            [self enableJITWithJitStreamer:[getPreference(@"enable_altkit") boolValue]];
         }
-    } else if (!NSProcessInfo.processInfo.macCatalystApp && !getenv("SIMULATOR_DEVICE_NAME")) {
-        [self displayProgress:localize(@"login.jit.fail", nil)];
-        [self displayProgress:nil];
-        UIAlertController* alert = [UIAlertController alertControllerWithTitle:localize(@"login.jit.fail.title", nil)
-            message:localize(@"login.jit.fail.description_unsupported", nil)
-            preferredStyle:UIAlertControllerStyleAlert];
-        UIAlertAction* okAction = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:^(id action){
-            exit(-1);
-        }];
-        [alert addAction:okAction];
-        [self presentViewController:alert animated:YES completion:nil];
     }
 }
 
@@ -162,16 +147,14 @@
 }
 
 - (UIBarButtonItem *)drawAccountButton {
-    if (!self.accountBtnItem) {
-        self.accountButton = [UIButton buttonWithType:UIButtonTypeCustom];
-        [self.accountButton addTarget:self action:@selector(selectAccount:) forControlEvents:UIControlEventPrimaryActionTriggered];
-        self.accountButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    self.accountButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    [self.accountButton addTarget:self action:@selector(selectAccount:) forControlEvents:UIControlEventPrimaryActionTriggered];
+    self.accountButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
 
-        self.accountButton.titleEdgeInsets = UIEdgeInsetsMake(0, 4, 0, -4);
-        self.accountButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
-        self.accountButton.titleLabel.lineBreakMode = NSLineBreakByWordWrapping;
-        self.accountBtnItem = [[UIBarButtonItem alloc] initWithCustomView:self.accountButton];
-    }
+    self.accountButton.titleEdgeInsets = UIEdgeInsetsMake(0, 4, 0, -4);
+    self.accountButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
+    self.accountButton.titleLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    self.accountBtnItem = [[UIBarButtonItem alloc] initWithCustomView:self.accountButton];
 
     [self updateAccountInfo];
     
@@ -179,8 +162,10 @@
 }
 
 - (void)restoreHighlightedSelection {
+
     // Restore the selected row when the view appears again
-    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:self.lastSelectedIndex inSection:0];
+    int index = [self.options indexOfObject:[contentNavigationController viewControllers][0]];
+    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:MAX(0, index) inSection:0];
     [self.tableView selectRowAtIndexPath:indexPath animated:NO scrollPosition:UITableViewScrollPositionNone];
 }
 
@@ -197,60 +182,64 @@
     }
 
     cell.textLabel.text = [self.options[indexPath.row] title];
-    
-    UIImage *origImage = [UIImage systemImageNamed:[self.options[indexPath.row]
-        performSelector:@selector(imageName)]];
-    if (origImage) {
-        UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(40, 40)];
-        UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext*_Nonnull myContext) {
-            CGFloat scaleFactor = 40/origImage.size.height;
-            [origImage drawInRect:CGRectMake(20 - origImage.size.width*scaleFactor/2, 0, origImage.size.width*scaleFactor, 40)];
-        }];
-        cell.imageView.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    if (@available(iOS 13.0, *)) {
+        UIImage *origImage = [UIImage systemImageNamed:[self.options[indexPath.row]
+            performSelector:@selector(imageName)]];
+        if (origImage) {
+            UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(50, 50)];
+            UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext*_Nonnull myContext) {
+                CGFloat scaleFactor = 50/origImage.size.height;
+                [origImage drawInRect:CGRectMake(25 - origImage.size.width*scaleFactor/2, 0, origImage.size.width*scaleFactor, 50)];
+            }];
+            cell.imageView.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        }
     }
-    
     if (cell.imageView.image == nil) {
         cell.imageView.layer.magnificationFilter = kCAFilterNearest;
         cell.imageView.layer.minificationFilter = kCAFilterNearest;
         cell.imageView.image = [UIImage imageNamed:[self.options[indexPath.row]
             performSelector:@selector(imageName)]];
-        cell.imageView.image = [cell.imageView.image _imageWithSize:CGSizeMake(40, 40)];
     }
     return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    LauncherMenuCustomItem *selected = self.options[indexPath.row];
+    UIViewController *selected = self.options[indexPath.row];
     
-    if (selected.action != nil) {
-        [self restoreHighlightedSelection];
-        ((LauncherMenuCustomItem *)selected).action();
-    } else {
+    if ([selected isKindOfClass:UIViewController.class]) {
         if(self.isInitialVc) {
             self.isInitialVc = NO;
         } else {
-            self.options[self.lastSelectedIndex].vcArray = contentNavigationController.viewControllers;
-            [contentNavigationController setViewControllers:selected.vcArray animated:NO];
-            self.lastSelectedIndex = indexPath.row;
+            [contentNavigationController setViewControllers:@[selected] animated:NO];
         }
-        selected.vcArray[0].navigationItem.rightBarButtonItem = self.accountBtnItem;
-        selected.vcArray[0].navigationItem.leftBarButtonItem = self.splitViewController.displayModeButtonItem;
-        selected.vcArray[0].navigationItem.leftItemsSupplementBackButton = true;
+        
+        if([self.options[indexPath.row].title isEqualToString:localize(@"Settings", nil)]) {
+            LauncherPreferencesViewController *vc = (LauncherPreferencesViewController *)selected;
+            selected.navigationItem.rightBarButtonItems = @[self.accountBtnItem, [vc drawHelpButton]];
+        } else {
+            selected.navigationItem.rightBarButtonItem = self.accountBtnItem;
+        }
+        
+        selected.navigationItem.leftBarButtonItem = self.splitViewController.displayModeButtonItem;
+        selected.navigationItem.leftItemsSupplementBackButton = true;
+    } else {
+        [self restoreHighlightedSelection];
+        ((LauncherMenuCustomItem *)selected).action();
     }
 }
 
 - (void)selectAccount:(UIButton *)sender {
     AccountListViewController *vc = [[AccountListViewController alloc] init];
     vc.whenDelete = ^void(NSString* name) {
-        if ([name isEqualToString:getPrefObject(@"internal.selected_account")]) {
+        if ([name isEqualToString:getPreference(@"selected_account")]) {
             BaseAuthenticator.current = nil;
-            setPrefObject(@"internal.selected_account", @"");
+            setPreference(@"selected_account", @"");
             [self updateAccountInfo];
         }
     };
     vc.whenItemSelected = ^void() {
-        setPrefObject(@"internal.selected_account", BaseAuthenticator.current.authData[@"username"]);
+        setPreference(@"selected_account", BaseAuthenticator.current.authData[@"username"]);
         [self updateAccountInfo];
         if (sender != self.accountButton) {
             // Called from the play button, so call back to continue
@@ -287,13 +276,11 @@
     BOOL isDemo = [selected[@"username"] hasPrefix:@"Demo."];
     NSMutableAttributedString *title = [[NSMutableAttributedString alloc] initWithString:[selected[@"username"] substringFromIndex:(isDemo?5:0)]];
 
-    // Check if we're switching between demo and full mode
-    BOOL shouldUpdateProfiles = (getenv("DEMO_LOCK")!=NULL) != isDemo;
-
     // Reset states
     unsetenv("DEMO_LOCK");
     setenv("POJAV_GAME_DIR", [NSString stringWithFormat:@"%s/Library/Application Support/minecraft", getenv("POJAV_HOME")].UTF8String, 1);
 
+    
     id subtitle;
     if (isDemo) {
         subtitle = localize(@"login.option.demo", nil);
@@ -323,16 +310,10 @@
     [self.accountButton.imageView setImageWithURL:url placeholderImage:placeholder];
     [self.accountButton sizeToFit];
 
-    // Update profiles and local version list if needed
-    if (shouldUpdateProfiles) {
-        [contentNavigationController fetchLocalVersionList];
-        [contentNavigationController performSelector:@selector(reloadProfileList)];
-    }
-
-    // Update tableView whenever we have
-    UITableViewController *tableVC = contentNavigationController.viewControllers.lastObject;
-    if ([tableVC isKindOfClass:UITableViewController.class]) {
-        [tableVC.tableView reloadData];
+    // Update the version list, only if the selected type is Installed
+    int selectedVersionType = [getPreference(@"selected_version_type") intValue];
+    if (selectedVersionType == 0) {
+        [contentNavigationController reloadVersionList:0];
     }
 }
 
@@ -344,27 +325,67 @@
     }
 }
 
-- (void)enableJITWithAltKit {
+- (void)enableJITWithAltKit
+{
     [ALTServerManager.sharedManager startDiscovering];
     [ALTServerManager.sharedManager autoconnectWithCompletionHandler:^(ALTServerConnection *connection, NSError *error) {
         if (error) {
             NSLog(@"[AltKit] Could not auto-connect to server. %@", error.localizedRecoverySuggestion);
-            [self displayProgress:localize(@"login.jit.fail", nil)];
-            [self displayProgress:nil];
         }
         [connection enableUnsignedCodeExecutionWithCompletionHandler:^(BOOL success, NSError *error) {
             if (success) {
                 NSLog(@"[AltKit] Successfully enabled JIT compilation!");
                 [ALTServerManager.sharedManager stopDiscovering];
-                [self displayProgress:localize(@"login.jit.enabled", nil)];
-                [self displayProgress:nil];
             } else {
                 NSLog(@"[AltKit] Error enabling JIT: %@", error.localizedRecoverySuggestion);
-                [self displayProgress:localize(@"login.jit.fail", nil)];
-                [self displayProgress:nil];
+                showDialog(self, localize(@"login.jit.fail.title", nil), localize(@"login.jit.fail.description", nil));
             }
             [connection disconnect];
         }];
+    }];
+}
+
+- (void)enableJITWithJitStreamer:(BOOL)shouldRunAltKit
+{
+    [self displayProgress:localize(@"login.jit.checking", nil)];
+
+    // TODO: customizable address
+    NSString *address = getPreference(@"jitstreamer_server");
+    NSLog(@"[JitStreamer] Server is %@, attempting to connect...", address);
+
+    AFHTTPSessionManager *manager = AFHTTPSessionManager.manager;
+    manager.requestSerializer.timeoutInterval = 10;
+    manager.responseSerializer = AFHTTPResponseSerializer.serializer;
+    manager.responseSerializer.acceptableContentTypes = [NSSet setWithObjects:@"text/plain", nil];
+    [manager GET:[NSString stringWithFormat:@"http://%@/version", address] parameters:nil headers:nil progress:nil success:^(NSURLSessionDataTask *task, NSData *response) {
+        NSString *version = [[NSString alloc] initWithData:response encoding:NSUTF8StringEncoding];
+        NSLog(@"[JitStreamer] Found JitStreamer %@", version);
+        manager.requestSerializer.timeoutInterval = 0;
+        manager.responseSerializer = AFJSONResponseSerializer.serializer;
+        void(^handleResponse)(NSURLSessionDataTask *task, id response) = ^void(NSURLSessionDataTask *task, id response){
+            NSDictionary *responseDict;
+            // FIXME: successful response may fail due to serialization issues
+            if ([response isKindOfClass:NSError.class]) {
+                NSDebugLog(@"Error?: %@", responseDict);
+                NSData *errorData = ((NSError *)response).userInfo[AFNetworkingOperationFailingURLResponseDataErrorKey];
+                responseDict = [NSJSONSerialization JSONObjectWithData:errorData options:0 error:nil];
+            } else {
+                responseDict = response;
+            }
+            if ([responseDict[@"success"] boolValue]) {
+                [self displayProgress:localize(@"login.jit.enabled", nil)];
+                [self displayProgress:nil];
+            } else {
+                NSLog(@"[JitStreamer] Error enabling JIT: %@", responseDict[@"message"]);
+                if(shouldRunAltKit) { [self enableJITWithAltKit]; }
+                else { showDialog(self, localize(@"login.jit.fail.title", nil), localize(@"login.jit.fail.description", nil)); }
+            }
+        };
+        [manager POST:[NSString stringWithFormat:@"http://%@/attach/%d/", address, getpid()] parameters:nil headers:nil progress:nil success:handleResponse failure:handleResponse];
+    } failure:^(NSURLSessionDataTask *task, NSError *error) {
+        NSLog(@"[JitStreamer] Server not found or VPN not connected.");
+        if(shouldRunAltKit) { [self enableJITWithAltKit]; }
+        else { showDialog(self, localize(@"login.jit.fail.title", nil), localize(@"login.jit.fail.description", nil)); }
     }];
 }
 

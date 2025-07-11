@@ -15,9 +15,12 @@ extern NSMutableDictionary *prefDict;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = UIColor.systemBackgroundColor;
-    if ([getPrefObject(@"control.control_safe_area") length] == 0) {
-        setPrefObject(@"control.control_safe_area", NSStringFromUIEdgeInsets(getDefaultSafeArea()));
+    UIApplication.sharedApplication.idleTimerDisabled = YES;
+    setViewBackgroundColor(self.view);
+    setDefaultValueForPref(prefDict, @"control_safe_area", NSStringFromUIEdgeInsets(getDefaultSafeArea()));
+    if (![getPreference(@"internal_reset_safe_area") boolValue]) {
+        setPreference(@"internal_reset_safe_area", @YES);
+        setPreference(@"control_safe_area", NSStringFromUIEdgeInsets(getDefaultSafeArea()));
     }
 
     self.delegate = self;
@@ -49,7 +52,7 @@ extern NSMutableDictionary *prefDict;
 - (void)changeDisplayModeForSize:(CGSize)size {
     BOOL isPortrait = size.height > size.width;
     if (self.preferredDisplayMode == 0 || self.displayMode != UISplitViewControllerDisplayModeSecondaryOnly) {
-        if(!getPrefBool(@"general.hidden_sidebar")) {
+        if([getPreference(@"hidden_sidebar") boolValue] == NO) {
             self.preferredDisplayMode = isPortrait ?
                 UISplitViewControllerDisplayModeOneOverSecondary :
                 UISplitViewControllerDisplayModeOneBesideSecondary;
@@ -57,9 +60,11 @@ extern NSMutableDictionary *prefDict;
             self.preferredDisplayMode = UISplitViewControllerDisplayModeSecondaryOnly;
         }
     }
-    self.preferredSplitBehavior = isPortrait ?
-        UISplitViewControllerSplitBehaviorOverlay :
-        UISplitViewControllerSplitBehaviorTile;
+    if (@available(iOS 14.0, tvOS 14.0, *)) {
+        self.preferredSplitBehavior = isPortrait ?
+            UISplitViewControllerSplitBehaviorOverlay :
+            UISplitViewControllerSplitBehaviorTile;
+    }
 }
 
 - (void)dismissViewController {

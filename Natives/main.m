@@ -1,17 +1,14 @@
 #import <mach-o/dyld.h>
+#import <mach/mach.h>
+#import <mach/mach_host.h>
 #import <spawn.h>
 #import <sys/sysctl.h>
 #import <UIKit/UIKit.h>
 
 #import "AppDelegate.h"
 #import "customcontrols/CustomControlsUtils.h"
-#import "HostManagerBridge.h"
-#import "JavaLauncher.h"
 #import "LauncherPreferences.h"
-#import "PLLogOutputView.h"
-#import "PLProfiles.h"
 #import "SurfaceViewController.h"
-#import "UIKit+hook.h"
 #import "config.h"
 
 #include <libgen.h>
@@ -19,9 +16,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <dirent.h>
+#include "JavaLauncher.h"
 #include "utils.h"
 #include "codesign.h"
+#include "HostManagerBridge.h"
 
 #define CS_PLATFORM_BINARY 0x4000000
 #define PT_TRACE_ME 0
@@ -32,12 +35,6 @@ extern char** environ;
 
 void printEntitlementAvailability(NSString *key) {
     NSLog(@"* %@: %@", key, getEntitlementValue(key) ? @"YES" : @"NO");
-}
-
-void uncaughtExceptionHandler(NSException *exception) {
-    NSLog(@"Uncaught exception: %@", exception.description);
-    NSLog(@"Call stack: %@", exception.callStackSymbols);
-    usleep(10000);
 }
 
 bool init_checkForsubstrated() {
@@ -75,64 +72,137 @@ bool init_checkForsubstrated() {
     return false;
 }
 
-bool init_checkForJailbreak() {
-    if (NSProcessInfo.processInfo.macCatalystApp) {
-        // macOS doesn't automatically enable JIT.
-        return false;
-    } else if (init_checkForsubstrated()) {
-        return true;
-    }
-
-    // Check if posix_spawn is hooked
-    for (int i=0; i < _dyld_image_count(); i++) {
+void init_checkForJailbreak() {
+    bool jbDyld = false;
+    bool jbFlag = false;
+    bool jbProc = init_checkForsubstrated();
+    bool jbFile = false;
+    
+    int imageCount = _dyld_image_count();
+    uint32_t flags = CS_PLATFORM_BINARY;
+    
+    for (int i=0; i < imageCount; i++) {
         if (strcmp(_dyld_get_image_name(i),"/usr/lib/pspawn_payload-stg2.dylib") == 0) {
-            return true;
+            jbDyld = true;
         }
     }
 
-    // Check if we have platform bit set
-    uint32_t flags;
-    csops(0, CS_OPS_STATUS, &flags, sizeof(flags));
-    if ((flags & CS_PLATFORM_BINARY) != 0) {
-        return true;
+    if (csops(0, CS_OPS_STATUS, &flags, sizeof(flags)) != -1) {
+        if ((flags & CS_PLATFORM_BINARY) != 0) {
+            jbFlag = true;
+        }
     }
 
-    return opendir("/Applications") != NULL;
+    DIR *apps = opendir("/Applications");
+    if(apps != NULL) {
+        jbFile = true;
+    }
+    
+    if (jbDyld || jbFlag || jbProc || jbFile) {
+        setenv("POJAV_DETECTEDJB", "1", 1);
+    }
 }
 
 void init_logDeviceAndVer(char *argument) {
+    // Legacy IDs
+    NSDictionary *legacyIDs = @{
+        @"iPhone6,1" : @"iPhone 5s",
+        @"iPhone6,2" : @"iPhone 5s",
+        @"iPhone7,1" : @"iPhone 6 Plus",
+        @"iPhone7,2" : @"iPhone 6",
+        @"iPad4,1" : @"iPad Air (1st generation)",
+        @"iPad4,2" : @"iPad Air (1st generation)",
+        @"iPad4,3" : @"iPad Air (1st generation)",
+        @"iPad4,4" : @"iPad mini (2nd generation)",
+        @"iPad4,5" : @"iPad mini (2nd generation)",
+        @"iPad4,6" : @"iPad mini (2nd generation)",
+        @"iPad4,7" : @"iPad mini (3rd generation)",
+        @"iPad4,8" : @"iPad mini (3rd generation)",
+        @"iPad4,9" : @"iPad mini (3rd generation)",
+        @"iPod7,1" : @"iPod touch (6th generation)"
+    };
+    
     // PojavLauncher version
     NSLog(@"[Pre-Init] PojavLauncher INIT!");
     NSLog(@"[Pre-Init] Version: %@-%s", NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"], CONFIG_TYPE);
     NSLog(@"[Pre-Init] Commit: %s (%s)", CONFIG_COMMIT, CONFIG_BRANCH);
+
+    // Hardware + Software
+    setenv("POJAV_DETECTEDSW", [HostManager GetPlatformVersion].UTF8String, 1);
+    setenv("POJAV_DETECTEDHW", [HostManager GetModelName].UTF8String, 1);
     
-    NSString *tsPath = [NSString stringWithFormat:@"%@/../_TrollStore", NSBundle.mainBundle.bundlePath];
-    const char *type;
-    if (!access(tsPath.UTF8String, F_OK)) {
+    NSString *tsPath = [NSString stringWithFormat:@"%s/../_TrollStore", getenv("BUNDLE_PATH")];
+    const char *type = "Unjailbroken";
+    if ([fm fileExistsAtPath:tsPath]) {
         type = "TrollStore";
-    } else if (isJailbroken) {
+    } else if (getenv("POJAV_DETECTEDJB")) {
         type = "Jailbroken";
-    } else {
-        type = "Unjailbroken";
     }
+    
     setenv("POJAV_DETECTEDINST", type, 1);
     
-    NSLog(@"[Pre-Init] Device: %@", [HostManager GetModelName]);
-    NSLog(@"[Pre-Init] %@ (%s)", UIDevice.currentDevice.completeOSVersion, type);
+    NSLog(@"[Pre-Init] Device: %s", getenv("POJAV_DETECTEDHW"));
+    NSLog(@"[Pre-Init] iOS %s (%s)", getenv("POJAV_DETECTEDSW"), getenv("POJAV_DETECTEDINST"));
+    
+    if(legacyIDs[[HostManager GetModelIdentifier]] != nil) {
+        NSLog(@"[Pre-Init] Currently running on legacy device");
+    } else {
+        if([HostManager GetPlatformVersion].floatValue < 14) {
+            NSLog(@"[Pre-Init] Currently running on legacy iOS");
+        }
+    }
+    
+    NSString *jvmPath = [NSString stringWithFormat:@"%s/java_runtimes", getenv("BUNDLE_PATH")];
+    if (![fm fileExistsAtPath:jvmPath]) {
+#if !CONFIG_RELEASE
+        setenv("POJAV_PREFER_EXTERNAL_JRE", "1", 1);
+        NSLog(@"[Java] !!! THIS FEATURE IS A WORK IN PROGRESS !!!");
+        NSLog(@"[Java] Loading runtimes from Documents directory.");
+#else
+        NSLog(@"[Java] No runtimes available to use.");
+#endif
+    }
     
     NSLog(@"[Pre-init] Entitlements availability:");
     printEntitlementAvailability(@"com.apple.developer.kernel.extended-virtual-addressing");
     printEntitlementAvailability(@"com.apple.developer.kernel.increased-memory-limit");
     printEntitlementAvailability(@"com.apple.private.security.no-sandbox");
-    //printEntitlementAvailability(@"dynamic-codesigning");
+    printEntitlementAvailability(@"dynamic-codesigning");
+}
+
+void init_migrateDirIfNecessary() {
+    NSString *oldDir = @"/usr/share/pojavlauncher";
+    if ([fm fileExistsAtPath:oldDir]) {
+        NSString *newDir = @"";
+        if ([@(getenv("HOME")) isEqualToString:@"/var/mobile"]) {
+            newDir = [NSString stringWithFormat:@"%s/Documents/PojavLauncher", getenv("HOME")];
+        } else {
+            newDir = [NSString stringWithFormat:@"%s/Documents", getenv("HOME")];
+        }
+        [fm moveItemAtPath:oldDir toPath:newDir error:nil];
+        [fm removeItemAtPath:oldDir error:nil];
+    }
+}
+
+void init_migrateToPlist(char* prefKey, char* filename) {
+    // NSString *readmeStr = @"#README - this file has been merged into launcher_preferences.plist";
+    NSError *error;
+    NSString *str, *path_str;
+
+    // overrideargs.txt
+    path_str = [NSString stringWithFormat:@"%s/%s", getenv("POJAV_HOME"), filename];
+    str = [NSString stringWithContentsOfFile:path_str encoding:NSUTF8StringEncoding error:&error];
+    if (error == nil && ![str hasPrefix:@"#README"]) {
+        setPreference(@(prefKey), str);
+        [@"#README - this file has been merged into launcher_preferences.plist" writeToFile:path_str atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
 }
 
 void init_redirectStdio() {
     NSLog(@"[Pre-init] Starting logging STDIO to latestlog.txt\n");
 
-    NSString *home = @(getenv("POJAV_HOME"));
-    NSString *currName = [home stringByAppendingPathComponent:@"latestlog.txt"];
-    NSString *oldName = [home stringByAppendingPathComponent:@"latestlog.old.txt"];
+    NSString *currName = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"latestlog.txt"];
+    NSString *oldName = [@(getenv("POJAV_HOME")) stringByAppendingPathComponent:@"latestlog.old.txt"];
     [fm removeItemAtPath:oldName error:nil];
     [fm moveItemAtPath:currName toPath:oldName error:nil];
 
@@ -150,8 +220,8 @@ void init_redirectStdio() {
     /* create the pipe and redirect stdout and stderr */
     static int pfd[2];
     pipe(pfd);
-    dup2(pfd[1], fileno(stdout));
-    dup2(pfd[1], fileno(stderr));
+    dup2(pfd[1], 1);
+    dup2(pfd[1], 2);
 
     /* create the logging thread */
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -174,16 +244,13 @@ void init_redirectStdio() {
                 }
             }
             if (canAppendToLog) {
-                [PLLogOutputView appendToLog:@(buf)];
+                [SurfaceViewController appendToLog:@(buf)];
             }
             [file writeData:[NSData dataWithBytes:buf length:rsize]];
             [file synchronizeFile];
         }
         [file closeFile];
     });
-
-    // We can start catching exception right now
-    NSSetUncaughtExceptionHandler(&uncaughtExceptionHandler);
 }
 
 void init_setupAccounts() {
@@ -200,31 +267,40 @@ void init_setupCustomControls() {
     generateAndSaveDefaultControlForGamepad();
 }
 
+void init_setupLauncherProfiles() {
+    NSString *file = [@(getenv("POJAV_GAME_DIR")) stringByAppendingPathComponent:@"launcher_profiles.json"];
+    if (![fm fileExistsAtPath:file]) {
+        NSDictionary *dict = @{
+            @"profiles": @{
+                @"(Default)": @{
+                    @"name": @"(Default)",
+                    @"lastVersionId": @"Unknown"
+                }
+            },
+            @"selectedProfile": @"(Default)"
+        };
+        saveJSONToFile(dict, file);
+    }
+}
+
 void init_setupMultiDir() {
-    NSString *multidir = getPrefObject(@"general.game_directory");
+    NSString *multidir = getPreference(@"game_directory");
     if (multidir.length == 0) {
         multidir = @"default";
-        setPrefObject(@"general.game_directory", multidir);
+        setPreference(@"game_directory", multidir);
         NSLog(@"[Pre-init] Game directory was not set. Defaulting to %@ for future use.\n", multidir);
     } else {
         NSLog(@"[Pre-init] Restored game directory preference (%@)\n", multidir);
     }
 
-    const char *home = getenv("POJAV_HOME");
-    NSString *lasmPath = [NSString stringWithFormat:@"%s/Library/Application Support/minecraft", home];
-    NSString *multidirPath = [NSString stringWithFormat:@"%s/instances/%@", home, multidir];
+    NSString *lasmPath = [NSString stringWithFormat:@"%s/Library/Application Support/minecraft", getenv("POJAV_HOME")]; //libr
+    NSString *multidirPath = [NSString stringWithFormat:@"%s/instances/%@", getenv("POJAV_HOME"), multidir];
+    NSString *demoPath = [NSString stringWithFormat:@"%s/.demo", getenv("POJAV_HOME")];
 
-
-    NSArray *dirsToCreate = @[
-        [NSString stringWithFormat:@"%s/.demo", home],
-        [NSString stringWithFormat:@"%s/java_runtimes", home],
-        lasmPath.stringByDeletingLastPathComponent,
-        multidirPath
-    ];
-    for (NSString *dir in dirsToCreate) {
-        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    }
+    [fm createDirectoryAtPath:demoPath withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm createDirectoryAtPath:multidirPath withIntermediateDirectories:YES attributes:nil error:nil];
     [fm removeItemAtPath:lasmPath error:nil];
+    [fm createDirectoryAtPath:lasmPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     [fm createSymbolicLinkAtPath:lasmPath withDestinationPath:multidirPath error:nil];
     [fm changeCurrentDirectoryPath:lasmPath];
     setenv("POJAV_GAME_DIR", lasmPath.UTF8String, 1);
@@ -246,9 +322,11 @@ void init_setupHomeDirectory() {
     NSString *homeDir;
     NSError *homeError;
     
-    BOOL isNotSandboxed = [@(getenv("HOME")).lastPathComponent isEqualToString:NSUserName()];
-    homeDir = [NSString stringWithFormat:@"%s/Documents%@", getenv("HOME"),
-        isNotSandboxed ? @"/PojavLauncher":@""];
+    if ([@(getenv("HOME")) isEqualToString:@"/var/mobile"]) {
+        homeDir = @"/var/mobile/Documents/PojavLauncher";
+    } else {
+        homeDir = [NSString stringWithFormat:@"%s/Documents", getenv("HOME")];
+    }
 
     if (![fm fileExistsAtPath:homeDir] ) {
         [fm createDirectoryAtPath:homeDir withIntermediateDirectories:NO attributes:nil error:&homeError];
@@ -261,7 +339,7 @@ void init_setupHomeDirectory() {
         [fm createDirectoryAtPath:homeDir withIntermediateDirectories:YES attributes:nil error:&homeError];
     }
     
-    setenv("POJAV_HOME", realpath(homeDir.UTF8String, NULL), 1);
+    setenv("POJAV_HOME", homeDir.UTF8String, 1);
 }
 
 int main(int argc, char *argv[]) {
@@ -269,6 +347,7 @@ int main(int argc, char *argv[]) {
         return pJLI_Launch(argc, (const char **)argv,
                    0, NULL, // sizeof(const_jargs) / sizeof(char *), const_jargs,
                    0, NULL, // sizeof(const_appclasspath) / sizeof(char *), const_appclasspath,
+                   // PojavLancher: fixme: are these wrong?
                    "1.8.0-internal",
                    "1.8",
 
@@ -286,7 +365,9 @@ int main(int argc, char *argv[]) {
     }
 
     setenv("BUNDLE_PATH", dirname(argv[0]), 1);
-    isJailbroken = init_checkForJailbreak();
+    init_checkForJailbreak();
+    
+    init_migrateDirIfNecessary();
     init_setupHomeDirectory();
     init_redirectStdio();
     init_logDeviceAndVer(argv[0]);
@@ -295,15 +376,18 @@ int main(int argc, char *argv[]) {
     init_hookUIKitConstructor();
 
     loadPreferences(NO);
-    debugLogEnabled = getPrefBool(@"general.debug_logging");
+    debugBoundsEnabled = [getPreference(@"debug_show_layout_bounds") boolValue];
+    debugLogEnabled = [getPreference(@"debug_logging") boolValue];
     NSLog(@"[Debugging] Debug log enabled: %@", debugLogEnabled ? @"YES" : @"NO");
 
     init_setupResolvConf();
     init_setupMultiDir();
-    toggleIsolatedPref(NO);
-    [PLProfiles updateCurrent];
+    init_setupLauncherProfiles();
     init_setupAccounts();
     init_setupCustomControls();
+
+    init_migrateToPlist("selected_version", "config_ver.txt");
+    init_migrateToPlist("java_args", "overrideargs.txt");
 
     // If sandbox is disabled, W^X JIT can be enabled by PojavLauncher itself
     if (!isJITEnabled(true) && getEntitlementValue(@"com.apple.private.security.no-sandbox")) {

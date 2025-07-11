@@ -9,7 +9,7 @@ OUTPUTDIR   := $(SOURCEDIR)/artifacts
 WORKINGDIR  := $(SOURCEDIR)/Natives/build
 DETECTPLAT  := $(shell uname -s)
 DETECTARCH  := $(shell uname -m)
-VERSION     := 3.0
+VERSION     := 2.2
 BRANCH      := $(shell git branch --show-current)
 COMMIT      := $(shell git log --oneline | sed '2,10000000d' | cut -b 1-7)
 PLATFORM    ?= 2
@@ -80,21 +80,12 @@ $(warning Set PLATFORM to 2, which is equal to iOS.)
 else ifeq ($(PLATFORM),3)
 PLATFORM_NAME := tvos
 $(warning Set PLATFORM to 3, which is equal to tvOS.)
-else ifeq ($(PLATFORM),6)
-PLATFORM_NAME := maccatalyst
-$(warning Set PLATFORM to 6, which is equal to Mac Catalyst.)
 else ifeq ($(PLATFORM),7)
 PLATFORM_NAME := iossimulator
 $(warning Set PLATFORM to 7, which is equal to iOS Simulator.)
 else ifeq ($(PLATFORM),8)
 PLATFORM_NAME := tvossimulator
 $(warning Set PLATFORM to 8, which is equal to tvOS Simulator.)
-else ifeq ($(PLATFORM),11)
-PLATFORM_NAME := xros
-$(warning Set PLATFORM to 11, which is equal to visionOS.)
-else ifeq ($(PLATFORM),12)
-PLATFORM_NAME := xrsimulator
-$(warning Set PLATFORM to 12, which is equal to visionOS Simulator.)
 else
 $(error PLATFORM is not valid.)
 endif
@@ -102,7 +93,6 @@ endif
 POJAV_BUNDLE_DIR      ?= $(OUTPUTDIR)/PojavLauncher.app
 POJAV_JRE8_DIR        ?= $(SOURCEDIR)/depends/java-8-openjdk
 POJAV_JRE17_DIR       ?= $(SOURCEDIR)/depends/java-17-openjdk
-POJAV_JRE21_DIR       ?= $(SOURCEDIR)/depends/java-21-openjdk
 
 # Function to use later for checking dependencies
 METHOD_DEPCHECK   = $(shell $(1) >/dev/null 2>&1 && echo 1)
@@ -124,29 +114,17 @@ METHOD_DIRCHECK   = \
 	fi
 	
 # Function to change the platform on Mach-O files.
-# iOS = 2, tvOS = 3, iOS Simulator = 7, tvOS Simulator = 8, visionOS = 11, visionOS Simulator = 12
-# https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/loader.h
-# TODO: Change Info.plist for visionOS 1.0
+# iOS = 2, tvOS = 3, iOS Simulator = 7, tvOS Simulator = 8
 METHOD_CHANGE_PLAT = \
-	if [ '$(1)' != '11' ] && [ '$(1)' != '12' ]; then \
-		vtool -arch arm64 -set-build-version $(1) 14.0 16.0 -replace -output $(2) $(2); \
-		ldid -S -M $(2); \
-	else \
-		vtool -arch arm64 -set-build-version $(1) 1.0 1.0 -replace -output $(2) $(2); \
-	fi \
+	vtool -arch arm64 -set-build-version $(1) 12.0 16.0 -replace -output $(2) $(2)
 	
 # Function to package the application
 METHOD_PACKAGE = \
-	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
-		IPA_SUFFIX="-trollstore.tipa"; \
-	else \
-		IPA_SUFFIX=".ipa"; \
-	fi; \
 	if [ '$(SLIMMED_ONLY)' = '0' ]; then \
-		zip --symlinks -r $(OUTPUTDIR)/net.kdt.pojavlauncher-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX Payload; \
+		zip --symlinks -r $(OUTPUTDIR)/net.kdt.pojavlauncher-$(VERSION)-$(PLATFORM_NAME).ipa Payload; \
 	fi; \
 	if [ '$(SLIMMED)' = '1' ] || [ '$(SLIMMED_ONLY)' = '1' ]; then \
-		zip --symlinks -r $(OUTPUTDIR)/net.kdt.pojavlauncher.slimmed-$(VERSION)-$(PLATFORM_NAME)$$IPA_SUFFIX Payload --exclude='Payload/PojavLauncher.app/java_runtimes/*'; \
+		zip --symlinks -r $(OUTPUTDIR)/net.kdt.pojavlauncher.slimmed-$(VERSION)-$(PLATFORM_NAME).ipa Payload --exclude='Payload/PojavLauncher.app/java_runtimes/*'; \
 	fi
 
 # Function to download and unpack Java runtimes.
@@ -256,7 +234,7 @@ native:
 		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
 		-DCMAKE_OSX_SYSROOT="$(SDKPATH)" \
 		-DCMAKE_OSX_ARCHITECTURES=arm64 \
-		-DCMAKE_C_FLAGS="-arch arm64" \
+		-DCMAKE_C_FLAGS="-arch arm64 -miphoneos-version-min=12.2" \
 		-DCONFIG_BRANCH="$(BRANCH)" \
 		-DCONFIG_COMMIT="$(COMMIT)" \
 		-DCONFIG_RELEASE=$(RELEASE) \
@@ -269,26 +247,29 @@ native:
 
 java:
 	echo '[PojavLauncher v$(VERSION)] java - start'
-	$(MAKE) -C JavaApp -j$(JOBS) BOOTJDK=$(BOOTJDK)
+	cd $(SOURCEDIR)/JavaApp; \
+	mkdir -p local_out/classes; \
+	$(BOOTJDK)/javac -cp "libs/*:libs_caciocavallo/*" -d local_out/classes $$(find src -type f -name "*.java" -print) -XDignore.symbol.file || exit 1; \
+	cd local_out/classes; \
+	$(BOOTJDK)/jar -cf ../launcher.jar android com net || exit 1; \
+	cp $(SOURCEDIR)/JavaApp/libs/lwjgl3-minecraft.jar ../lwjgl3-minecraft.jar || exit 1; \
+	$(BOOTJDK)/jar -uf ../lwjgl3-minecraft.jar org || exit 1;
 	echo '[PojavLauncher v$(VERSION)] java - end'
 
 jre: native
 	echo '[PojavLauncher v$(VERSION)] jre - start'
 	mkdir -p $(SOURCEDIR)/depends
 	cd $(SOURCEDIR)/depends; \
-	$(call METHOD_JAVA_UNPACK,8,'https://nightly.link/PojavLauncherTeam/android-openjdk-build-multiarch/workflows/build/buildjre8/jre8-ios-aarch64.zip'); \
-	$(call METHOD_JAVA_UNPACK,17,'https://nightly.link/PojavLauncherTeam/android-openjdk-build-multiarch/workflows/build/buildjre17-21/jre17-ios-aarch64.zip'); \
-	$(call METHOD_JAVA_UNPACK,21,'https://nightly.link/PojavLauncherTeam/android-openjdk-build-multiarch/workflows/build/buildjre17-21/jre21-ios-aarch64.zip'); \
+	$(call METHOD_JAVA_UNPACK,8,'https://nightly.link/PojavLauncherTeam/android-openjdk-build-multiarch/workflows/build/jre8-ios-jitjailed/jre8-ios-aarch64.zip'); \
+	$(call METHOD_JAVA_UNPACK,17,'https://nightly.link/PojavLauncherTeam/android-openjdk-build-multiarch/workflows/build/buildjre17/jre17-ios-aarch64.zip'); \
 	if [ -f "$(ls jre*.tar.xz)" ]; then rm $(SOURCEDIR)/depends/jre*.tar.xz; fi; \
 	cd $(SOURCEDIR); \
-	rm -rf $(SOURCEDIR)/depends/java-*-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,jspawnhelper,libjsig.dylib,src.zip,tools.jar}}; \
+	rm -rf $(SOURCEDIR)/depends/java-*-openjdk/{ASSEMBLY_EXCEPTION,bin,include,jre,legal,LICENSE,man,THIRD_PARTY_README,lib/{ct.sym,libjsig.dylib,src.zip,tools.jar}}; \
 	$(call METHOD_DIRCHECK,$(OUTPUTDIR)/java_runtimes); \
 	cp -R $(POJAV_JRE8_DIR) $(OUTPUTDIR)/java_runtimes; \
 	cp -R $(POJAV_JRE17_DIR) $(OUTPUTDIR)/java_runtimes; \
-	cp -R $(POJAV_JRE21_DIR) $(OUTPUTDIR)/java_runtimes; \
 	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-8-openjdk/lib; \
-	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-17-openjdk/lib;
-	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-21-openjdk/lib
+	cp $(WORKINGDIR)/libawt_xawt.dylib $(OUTPUTDIR)/java_runtimes/java-17-openjdk/lib
 	echo '[PojavLauncher v$(VERSION)] jre - end'
 
 assets:
@@ -298,7 +279,7 @@ assets:
 		xcrun actool $(SOURCEDIR)/Natives/Assets.xcassets \
 			--compile $(SOURCEDIR)/Natives/resources \
 			--platform iphoneos \
-			--minimum-deployment-target 14.0 \
+			--minimum-deployment-target 12.0 \
 			--app-icon AppIcon-Light \
 			--alternate-app-icon AppIcon-Dark \
 			--alternate-app-icon AppIcon-Development \
@@ -316,23 +297,16 @@ payload: native java jre assets
 	cp -R $(SOURCEDIR)/Natives/resources/en.lproj/LaunchScreen.storyboardc $(WORKINGDIR)/PojavLauncher.app/Base.lproj/ || exit 1
 	cp -R $(SOURCEDIR)/Natives/resources/* $(WORKINGDIR)/PojavLauncher.app/ || exit 1
 	cp $(WORKINGDIR)/*.dylib $(WORKINGDIR)/PojavLauncher.app/Frameworks/ || exit 1
-	cp -R $(SOURCEDIR)/JavaApp/libs/others/* $(WORKINGDIR)/PojavLauncher.app/libs/ || exit 1
-	cp $(SOURCEDIR)/JavaApp/build/*.jar $(WORKINGDIR)/PojavLauncher.app/libs/ || exit 1
-	cp -R $(SOURCEDIR)/JavaApp/libs/caciocavallo/* $(WORKINGDIR)/PojavLauncher.app/libs_caciocavallo || exit 1
-	cp -R $(SOURCEDIR)/JavaApp/libs/caciocavallo17/* $(WORKINGDIR)/PojavLauncher.app/libs_caciocavallo17 || exit 1
+	cp -R $(SOURCEDIR)/JavaApp/libs/* $(WORKINGDIR)/PojavLauncher.app/libs/ || exit 1
+	cp $(SOURCEDIR)/JavaApp/local_out/*.jar $(WORKINGDIR)/PojavLauncher.app/libs/ || exit 1
+	cp -R $(SOURCEDIR)/JavaApp/libs_caciocavallo* $(WORKINGDIR)/PojavLauncher.app/ || exit 1
 	$(call METHOD_DIRCHECK,$(OUTPUTDIR)/Payload)
 	cp -R $(WORKINGDIR)/PojavLauncher.app $(OUTPUTDIR)/Payload
 	if [ '$(SLIMMED_ONLY)' != '1' ]; then \
 		cp -R $(OUTPUTDIR)/java_runtimes $(OUTPUTDIR)/Payload/PojavLauncher.app; \
 	fi
 	ldid -S $(OUTPUTDIR)/Payload/PojavLauncher.app; \
-	if [ '$(TROLLSTORE_JIT_ENT)' == '1' ]; then \
-		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(OUTPUTDIR)/Payload/PojavLauncher.app/PojavLauncher; \
-	elif [ '$(PLATFORM)' == '6' ]; then \
-		ldid -S$(SOURCEDIR)/entitlements.codesign.xml $(OUTPUTDIR)/Payload/PojavLauncher.app/PojavLauncher; \
-	else \
-		ldid -S$(SOURCEDIR)/entitlements.sideload.xml $(OUTPUTDIR)/Payload/PojavLauncher.app/PojavLauncher; \
-	fi
+	ldid -S$(SOURCEDIR)/entitlements.xml $(OUTPUTDIR)/Payload/PojavLauncher.app/PojavLauncher; \
 	chmod -R 755 $(OUTPUTDIR)/Payload
 	if [ '$(PLATFORM)' != '2' ]; then \
 		$(call METHOD_MACHO,$(OUTPUTDIR)/Payload/PojavLauncher.app,$(call METHOD_CHANGE_PLAT,$(PLATFORM),$$file)); \
@@ -345,10 +319,10 @@ deploy:
 	cd $(OUTPUTDIR); \
 	if [ '$(IOS)' = '1' ]; then \
 		ldid -S $(WORKINGDIR)/PojavLauncher.app || exit 1; \
-		ldid -S$(SOURCEDIR)/entitlements.trollstore.xml $(WORKINGDIR)/PojavLauncher.app/PojavLauncher || exit 1; \
+		ldid -S$(SOURCEDIR)/entitlements.xml $(WORKINGDIR)/PojavLauncher.app/PojavLauncher || exit 1; \
 		sudo mv $(WORKINGDIR)/*.dylib $(PREFIX)Applications/PojavLauncher.app/Frameworks/ || exit 1; \
 		sudo mv $(WORKINGDIR)/PojavLauncher.app/PojavLauncher $(PREFIX)Applications/PojavLauncher.app/PojavLauncher || exit 1; \
-		sudo mv $(SOURCEDIR)/JavaApp/build/*.jar $(PREFIX)Applications/PojavLauncher.app/libs/ || exit 1; \
+		sudo mv $(SOURCEDIR)/JavaApp/local_out/*.jar $(PREFIX)Applications/PojavLauncher.app/libs/ || exit 1; \
 		cd $(PREFIX)Applications/PojavLauncher.app/Frameworks || exit 1; \
 		sudo chown -R 501:501 $(PREFIX)Applications/PojavLauncher.app/* || exit 1; \
 	elif [ '$(IOS)' = '0' ] && [ '$(DETECTPLAT)' = 'Darwin' ]; then \
@@ -400,7 +374,5 @@ clean:
 	rm -rf JavaApp/build
 	rm -rf $(OUTPUTDIR)
 	echo '[PojavLauncher v$(VERSION)] clean - end'
-
-		
 
 .PHONY: all clean check native java jre package dsym deploy help

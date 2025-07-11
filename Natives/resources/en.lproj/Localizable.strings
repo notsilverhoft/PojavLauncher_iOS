@@ -14,13 +14,11 @@
 
 // The play button
 "Play" = "Play";
-"Details" = "Details";
 
 // Version categories
 "Installed" = "Installed";
 "Snapshot" = "Snapshot";
 "Releases" = "Releases";
-"Unstable" = "Unstable";
 "Old-beta" = "Old-beta";
 "Old-alpha" = "Old-alpha";
 
@@ -30,12 +28,7 @@
 "Move" = "Move";
 "Remove" = "Remove";
 "Resize" = "Resize";
-// Visibility
-"Always" = "Always";
-"In game" = "In game";
-"In menu" = "In menu";
 
-"custom_controls.button_edit.forward_lock" = "Forward lock";
 "custom_controls.button_edit.name" = "Name";
 "custom_controls.button_edit.size" = "Size";
 "custom_controls.button_edit.mapping" = "Mapping";
@@ -44,17 +37,17 @@
 "custom_controls.button_edit.mouse_pass" = "Mouse pass";
 "custom_controls.button_edit.swipeable" = "Swipeable";
 "custom_controls.button_edit.bg_color" = "Background color";
-"custom_controls.button_edit.stroke_width" = "Stroke width (dp)";
+"custom_controls.button_edit.stroke_width" = "Stroke width (%)";
 "custom_controls.button_edit.stroke_color" = "Stroke color";
 "custom_controls.button_edit.corner_radius" = "Corner radius (%)";
 "custom_controls.button_edit.opacity" = "Opacity (%)";
-"custom_controls.button_edit.visibility" = "Visibility";
 
 "custom_controls.button_menu.add_subbutton" = "Add sub-button";
 "custom_controls.control_menu.discard_changes" = "Discard changes";
 "custom_controls.control_menu.exit" = "Exit";
 "custom_controls.control_menu.exit.warn" = "You are about to exit without saving changes.";
 "custom_controls.control_menu.save" = "Save";
+"custom_controls.control_menu.save.error.default" = "Control name can not be \"default\" as it will be overwritten.";
 "custom_controls.control_menu.save.error.json" = "JSON error";
 "custom_controls.control_menu.save.error.write" = "Error saving file";
 "custom_controls.control_menu.load" = "Load";
@@ -62,24 +55,19 @@
 "custom_controls.control_menu.safe_area" = "Safe area";
 "custom_controls.control_menu.add_button" = "Add button";
 "custom_controls.control_menu.add_drawer" = "Add drawer";
-"custom_controls.control_menu.add_joystick" = "Add joystick";
 "custom_controls.error.incompatible" = "This control version (code %d) is not implemented in this launcher build.";
 "custom_controls.hint" = "Long-press anywhere on screen for more options";
 
 "init.migrateDir" = "The PojavLauncher data directory is now %@. All of your existing data has been moved to the new location.";
 
-"java.error.missing_main_class" = "%@ is missing main class attribute. If this is a mod, put it into the “mods” folder of your selected instance.";
-"java.error.missing_runtime" = "%@ requires Java %d or later to run. Please install it first and specify it in Manage Runtimes.";
-
 "launcher.mcl.downloading_file" = "Downloading %@";
 "launcher.mcl.error_download" = "Failed to download %@: %@";
 
 "launcher.menu.custom_controls" = "Custom controls";
-"launcher.menu.execute_jar" = "Execute .jar";
+"launcher.menu.install_jar" = "Install .jar";
 
 "launcher.wait_jit.title" = "Waiting for JIT";
 "launcher.wait_jit.message" = "PojavLauncher relies on Just-in-time compilation for Java to work at maximum performance.";
-"launcher.wait_jit_trollstore.message" = "If you still see this message, please enable URL Scheme in TrollStore.";
 
 "login.error.username.outOfRange" = "Username must be at least 3 characters and a maximum of 16 characters";
 
@@ -90,7 +78,6 @@
 "login.jit.fail" = "JIT could not be enabled.";
 "login.jit.fail.title" = "JIT could not be enabled on your device.";
 "login.jit.fail.description" = "No integrations could be used to automatically enable JIT on your device, and it must now be enabled manually. Errors have been logged to latestlog.txt.";
-"login.jit.fail.description_unsupported" = "An unsupported installation method has been detected. Please reinstall using one of supported methods.";
 
 // Login buttons
 "login.menu.sendlogs" = "Send your logs";
@@ -126,7 +113,6 @@
 "login.msa.progress.checkMCProfile" = "(5/5) Checking the Minecraft profile";
 
 "News" = "News";
-"Profiles" = "Profiles";
 "Settings" = "Settings";
 
 "preference.section.general" = "General Settings";
@@ -134,7 +120,7 @@
 "preference.section.footer.video" = "Auto renderer allows PojavLauncher to choose the best option based on Minecraft version. Decreasing resolution reduces GPU workload for better performance.";
 "preference.section.control" = "Control customization";
 "preference.section.debug" = "UI Debugging settings";
-"preference.section.footer.debug" = "You may need to restart the launcher for changes to take effect.";
+"preference.section.footer.debug" = "Aside from debugging, these settings may be useful for custom controls. You may need to restart the launcher for changes to take effect.";
 //"preference.section.footer.control" = "";
 "preference.section.java" = "Java Tweaks";
 //"preference.section.footer.java" = "";
@@ -151,6 +137,10 @@
 "preference.detail.cosmetica" = "Enable capes from Cosmetica (previously Arc). For more information please visit https://cosmetica.cc. Requires OptiFine";
 "preference.title.debug_logging" = "Debug logging";
 "preference.detail.debug_logging" = "Logs internal settings and actions to latestlog.txt. This helps the developers find issues easier, but Minecraft may run slower as the logs will be written to more often.";
+"preference.title.jitstreamer_server" = "JitStreamer server IP";
+"preference.detail.jitstreamer_server" = "Allows you to change to a custom JitStreamer server IP, such as for self-hosted instances. This option can be left alone if you use the default JitStreamer servers.";
+"preference.title.enable_altkit" = "Enable AltKit integration";
+"preference.detail.enable_altkit" = "When enabled, PojavLauncher will attempt to connect to local AltServers to enable JIT.";
 "preference.title.appicon" = "Set app icon";
 "preference.detail.appicon" = "Allows you to choose between different Home Screen icons for PojavLauncher.";
 "preference.title.appicon-default" = "Familiar PojavLauncher light";
@@ -189,25 +179,19 @@
 "preference.title.max_framerate" = "Maximum framerate";
 "preference.detail.max_framerate" = "Allows you to limit the game framerate to 60FPS on ProMotion displays.";
 
-"preference.title.performance_hud" = "Show Performance HUD";
-"preference.detail.performance_hud" = "When available, show the performance monitoring overlay.";
-
 "preference.title.fullscreen_airplay" = "Fullscreen AirPlay";
 "preference.detail.fullscreen_airplay" = "Allows presenting fullscreen game window on the external display rather than mirroring everything on screen.";
 "preference.title.silence_other_audio" = "Pause audio when game opens";
 "preference.detail.silence_other_audio" = "Enable to allow PojavLauncher to pause audio from other apps, such as Music, when launching the game.";
-"preference.title.silence_with_switch" = "Disable audio with silent switch and deny microphone input";
-"preference.detail.silence_with_switch" = "Enable to disable audio when Silent Mode is on, and deny microphone input. Headphones and external speakers are not affected.";
+"preference.title.silence_with_switch" = "Disable audio with silent switch";
+"preference.detail.silence_with_switch" = "Enable to disable audio when Silent Mode is on. Headphones and external speakers are not affected.";
 "preference.title.default_gamepad_ctrl" = "Controller configuration";
 "preference.title.hardware_hide" = "Hide controls when hardware is connected";
 "preference.detail.hardware_hide" = "Enable the behaviour of automatically disabling the on-screen control overlay when a mouse or game controller is connected.";
-"preference.title.recording_hide" = "Hide controls from screen recording";
-"preference.detail.recording_hide" = "Hides controls from screenshot and screen recording while they remain visible on the screen.";
 "preference.title.gesture_mouse" = "Mouse gestures";
 "preference.detail.gesture_mouse" = "Enables gestures, such as tap to place block, hold to break block, scrolling with 2 fingers";
 "preference.title.gesture_hotbar" = "Hotbar gestures";
 "preference.detail.gesture_hotbar" = "Enables gestures, such as touch the hotbar slot, swap items between hand, throw items";
-"preference.title.disable_haptics" = "Disable on-screen haptics";
 "preference.title.press_duration" = "Long-press duration (ms)";
 "preference.detail.press_duration" = "Trigger press duration for destroying blocks and dropping items.";
 "preference.title.button_scale" = "On-screen button scale (%)";
@@ -228,22 +212,11 @@
 "preference.title.gyroscope_sensitivity" = "Gyroscope controls sensitivity";
 "preference.detail.gyroscope_sensitivity" = "Adjust the sensitivity of gyroscope controls";
 
-"preference.title.manage_runtime" = "Manage runtimes";
-"preference.title.confirm.delete_runtime" = "%@ will be deleted";
-"preference.manage_runtime.header.default" = "Preferred Java version";
-"preference.manage_runtime.default.1165" = "1.16.5 and older";
-"preference.manage_runtime.default.117" = "1.17 and newer";
-"preference.manage_runtime.footer.default" = "Minecraft 1.16.5 and older may run with a newer Java version, however compatibility with mods is not guaranteed. External runtimes can be placed in the “java_runtimes” folder. Changing Java version for “Execute .jar” only takes effect if the installer does not expect a newer Java version.";
-"preference.manage_runtime.footer.java8" = "This is the default version for Minecraft 1.16.5 and older.";
-"preference.manage_runtime.footer.java17" = "This is the default version for Minecraft 1.17 and newer.";
-"preference.manage_runtime.header.invalid" = "Invalid runtimes";
-
+"preference.title.java_home" = "Use Java 17 for Minecraft < 1.17";
+"preference.detail.java_home" = "Java 8 is used by default for those versions. Enable this option to force use Java 17, however compatibility is not guaranteed.";
 "preference.title.java_args" = "JVM Launch arguments";
 "preference.detail.java_args" = "Pass arguments to Java when launching Minecraft. Be careful, this can make the game crash if modified incorrectly.";
 "preference.placeholder.java_args" = "Specify arguments...";
-"preference.title.env_variables" = "Environment variables";
-"preference.detail.env_variables" = "Set custom environment variables when launching Minecraft. Be careful, this can make the game crash if modified incorrectly.";
-"preference.placeholder.env_variables" = "Specify variables...";
 "preference.title.auto_ram" = "Auto RAM";
 "preference.detail.auto_ram" = "Enables automatic RAM adjuster";
 "preference.warn.auto_ram" = "Disabling this option on an unjailbroken device can create instability if altered. Proceed with caution.";
@@ -261,23 +234,10 @@
 "preference.detail.debug_auto_correction" = "Enable auto correction when typing text in game.";
 "preference.title.debug_hide_home_indicator" = "Hide home indicator";
 "preference.detail.debug_hide_home_indicator" = "This will disable home indicator locking. You will need to use Guided Access to hide and lock home indicator at the same time.";
-
-"preference.profile.title.name" = "Name";
-"preference.profile.title.loader_type" = "Loader type";
-"preference.profile.title.loader_vendor" = "Loader vendor";
-"preference.profile.title.loader_version" = "Loader version";
-"preference.profile.title.version" = "Version";
-"preference.profile.title.version_type" = "Version type";
-"preference.profile.title.default_touch_control" = "Touch controls";
-"preference.profile.title.default_gamepad_control" = "Gamepad controls";
-
-"profile.error.name_exists" = "A profile with that name already exists. Please use another name.";
-"profile.section.instance" = "Game Instance settings";
-"profile.section.profiles" = "Profiles in this instance";
-"profile.title.create" = "Create new profile";
-"profile.title.separate_preference" = "Isolate settings";
-"profile.detail.separate_preference" = "Enable this option to isolate any changes made in settings. Doing a Reset will restore to global settings instead of default settings.";
-"profile.title.install_fabric_quilt" = "Install Fabric/Quilt";
+"preference.title.debug_show_layout_bounds" = "Show layout bounds";
+"preference.detail.debug_show_layout_bounds" = "Show clip bounds, margins";
+"preference.title.debug_show_layout_overlap" = "Show layout overlapping";
+"preference.detail.debug_show_layout_overlap" = "Overlay every view with a transparent color to reveal overlapping views.";
 
 "controller_configurator.title.current" = "Gamepad configuration file";
 "controller_configurator.title.type.xbox" = "Xbox";

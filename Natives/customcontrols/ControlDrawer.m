@@ -39,12 +39,13 @@
 // NOTE: Unlike Android's impl, this method uses dp instead of px (no call to dpToPx)
 - (void)alignButtons {
     NSString *orientation = (NSString *)self.drawerData[@"orientation"];
+    if ([orientation isEqualToString:@"FREE"]) {
+        return;
+    }
 
     for (int i = 0; i < self.buttons.count; i++) {
         ControlButton *button = self.buttons[i];
-        if ([orientation isEqualToString:@"FREE"]) {
-            // Do nothing but call update
-        } else if ([orientation isEqualToString:@"RIGHT"]) {
+        if ([orientation isEqualToString:@"RIGHT"]) {
             button.properties[@"dynamicX"] = [self generateDynamicX:self.frame.origin.x + ([self.properties[@"width"] floatValue] + 2.0) * (i+1)];
             button.properties[@"dynamicY"] = [self generateDynamicY:self.frame.origin.y];
         } else if ([orientation isEqualToString:@"LEFT"]) {
@@ -64,11 +65,6 @@
 }
 
 - (void)resizeButtons {
-    NSString *orientation = (NSString *)self.drawerData[@"orientation"];
-    if ([orientation isEqualToString:@"FREE"]) {
-        return;
-    }
-
     for (ControlButton *button in self.buttons) {
         button.properties[@"width"] = self.properties[@"width"];
         button.properties[@"height"] = self.properties[@"height"];
@@ -92,6 +88,7 @@
 
 - (void)preProcessProperties {
     [super preProcessProperties];
+    self.properties[@"isHideable"] = @(YES);
 }
 
 /*

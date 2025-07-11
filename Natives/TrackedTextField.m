@@ -108,10 +108,10 @@ extern bool isUseStackQueueCall;
 - (NSRange)insertFilteredText:(NSString *)text {
     int cursorPos = [super offsetFromPosition:self.beginningOfDocument toPosition:self.selectedTextRange.start];
 
-    int off = self.lastTextPos - cursorPos;
-    if (off > 0) {
+    // This also makes sure that lastTextPos != cursorPos (text should never be empty)
+    if (self.lastTextPos - cursorPos == text.length) {
         // Handle text markup by first deleting N amount of characters equal to the replaced text
-        [self sendMultiBackspaces:off];
+        [self sendMultiBackspaces:text.length];
     }
     // What else is done by past-autocomplete (insert a space after autocompletion)
     // See -[TrackedTextField replaceRangeWithTextWithoutClosingTyping:replacementText:]
@@ -126,18 +126,30 @@ extern bool isUseStackQueueCall;
 
 - (id)replaceRangeWithTextWithoutClosingTyping:(UITextRange *)range replacementText:(NSString *)text
 {
-    int oldLength = [super offsetFromPosition:range.start toPosition:range.end];
+    int length = [super offsetFromPosition:range.start toPosition:range.end];
 
     // Delete the range of needs for autocompletion
-    [self sendMultiBackspaces:oldLength];
+    [self sendMultiBackspaces:length];
 
     // Insert the autocompleted text
     [self sendText:text];
-    self.lastTextPos += text.length - oldLength;
 
     return [super replaceRangeWithTextWithoutClosingTyping:range replacementText:text];
 }
 
+// Handle multistage text input
+// for iOS 12.x
+- (void)setMarkedText:(NSString *)markedText selectedRange:(NSRange)selectedRange {
+    // Delete the marked range
+    NSInteger markedLength = [self offsetFromPosition:self.markedTextRange.start toPosition:self.markedTextRange.end];
+    [self sendMultiBackspaces:markedLength];
+
+    [super setMarkedText:markedText selectedRange:selectedRange];
+
+    // Insert the new text
+    [self sendText:markedText];
+}
+// for iOS 13+
 - (void)setAttributedMarkedText:(NSAttributedString *)markedText selectedRange:(NSRange)selectedRange {
     // Delete the marked range
     NSInteger markedLength = [self offsetFromPosition:self.markedTextRange.start toPosition:self.markedTextRange.end];
@@ -147,11 +159,6 @@ extern bool isUseStackQueueCall;
 
     // Insert the new text
     [self sendText:markedText.string];
-}
-
-- (void)setText:(NSString *)text {
-    [super setText:text];
-    self.lastTextPos = text.length;
 }
 
 @end

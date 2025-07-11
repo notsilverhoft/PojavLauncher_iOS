@@ -5,6 +5,10 @@
 #import "authenticator/BaseAuthenticator.h"
 #import "customcontrols/ControlButton.h"
 #import "customcontrols/ControlDrawer.h"
+// Incomplete
+#ifdef INTERNAL_VIRTUAL_JOYSTICK
+#import "customcontrols/ControlJoystick.h"
+#endif
 #import "customcontrols/ControlSubButton.h"
 #import "customcontrols/CustomControlsUtils.h"
 
@@ -15,34 +19,38 @@
 #import "JavaLauncher.h"
 #import "LauncherPreferences.h"
 #import "MinecraftResourceUtils.h"
-#import "PLProfiles.h"
 #import "SurfaceViewController.h"
 #import "TrackedTextField.h"
 #import "UIKit+hook.h"
+
 #import "ios_uikit_bridge.h"
 
 #include "glfw_keycodes.h"
 #include "utils.h"
 
-#include <dlfcn.h>
-
 int memorystatus_control(uint32_t command, int32_t pid, uint32_t flags, void *buffer, size_t buffersize);
 #define MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT        6
 
-static int currentHotbarSlot = -1;
-static GameSurfaceView* pojavWindow;
+// Debugging only
+// #define DEBUG_VISIBLE_TOUCH
+
+int inputTextLength;
+
+int currentHotbarSlot = -1;
+BOOL slideableHotbar;
+
+// TODO: key modifiers impl
+
 
 @interface SurfaceViewController ()<UITextFieldDelegate, UIPointerInteractionDelegate, UIGestureRecognizerDelegate> {
 }
-
-@property(nonatomic) NSDictionary* metadata;
 
 @property(nonatomic) TrackedTextField *inputTextField;
 @property(nonatomic) NSMutableArray* swipeableButtons;
 @property(nonatomic) ControlButton* swipingButton;
 @property(nonatomic) UITouch *primaryTouch, *hotbarTouch;
 
-@property(nonatomic) UILongPressGestureRecognizer* longPressGesture, *longPressTwoGesture;
+@property(nonatomic) UILongPressGestureRecognizer* longPressGesture;
 @property(nonatomic) UITapGestureRecognizer *tapGesture, *doubleTapGesture;
 
 @property(nonatomic) id mouseConnectCallback, mouseDisconnectCallback;
@@ -51,8 +59,7 @@ static GameSurfaceView* pojavWindow;
 @property(nonatomic) CGFloat screenScale;
 @property(nonatomic) CGFloat mouseSpeed;
 @property(nonatomic) CGRect clickRange;
-@property(nonatomic) BOOL isMacCatalystApp, shouldHideControlsFromRecording,
-    shouldTriggerClick, shouldTriggerHaptic, slideableHotbar, toggleHidden;
+@property(nonatomic) BOOL shouldTriggerClick;
 
 @property(nonatomic) BOOL enableMouseGestures, enableHotbarGestures;
 
@@ -63,26 +70,19 @@ static GameSurfaceView* pojavWindow;
 
 @implementation SurfaceViewController
 
-- (instancetype)initWithMetadata:(NSDictionary *)metadata {
-    self = [super init];
-    self.metadata = metadata;
-    return self;
-}
-
 - (void)viewDidLoad
 {
     [super viewDidLoad];
     isControlModifiable = NO;
-    self.isMacCatalystApp = NSProcessInfo.processInfo.isMacCatalystApp;
-    // Load MetalHUD library
-    dlopen("/usr/lib/libMTLHud.dylib", 0);
-
+    
     self.lightHaptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:(UIImpactFeedbackStyleLight)];
     self.mediumHaptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:(UIImpactFeedbackStyleMedium)];
 
-    //setPrefBool(@"internal.internal_launch_on_boot", NO);
+    setPreference(@"internal_launch_on_boot", @(NO));
+    isUseStackQueueCall = [getPreference(@"internal_useStackQueue") boolValue];
+    setPreference(@"internal_useStackQueue", nil);
 
-    UIApplication.sharedApplication.idleTimerDisabled = YES;
+    [[UIApplication sharedApplication] setIdleTimerDisabled:YES];
     BOOL isTVOS = realUIIdiom == UIUserInterfaceIdiomTV;
     if (!isTVOS) {
         [self setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
@@ -96,7 +96,7 @@ static GameSurfaceView* pojavWindow;
     };
     CADisplayLink *displayLink = [CADisplayLink displayLinkWithTarget:tickInput selector:@selector(invoke)];
     if (@available(iOS 15.0, tvOS 15.0, *)) {
-        if(getPrefBool(@"video.max_framerate")) {
+        if([getPreference(@"max_framerate") boolValue]) {
             displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 120, 120);
         } else {
             displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
@@ -119,7 +119,6 @@ static GameSurfaceView* pojavWindow;
     self.surfaceView.layer.contentsScale = screenScale * resolutionScale;
     self.surfaceView.layer.magnificationFilter = self.surfaceView.layer.minificationFilter = kCAFilterNearest;
     self.surfaceView.multipleTouchEnabled = YES;
-    pojavWindow = self.surfaceView;
 
     self.touchView = [[UIView alloc] initWithFrame:self.view.frame];
     self.touchView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.1];
@@ -131,17 +130,9 @@ static GameSurfaceView* pojavWindow;
 
     [self performSelector:@selector(setupCategory_Navigation)];
 
-    if (self.isMacCatalystApp) {
-        UIHoverGestureRecognizer *hoverGesture = [[NSClassFromString(@"UIHoverGestureRecognizer") alloc]
-        initWithTarget:self action:@selector(surfaceOnHover:)];
-        [self.surfaceView addGestureRecognizer:hoverGesture];
-    }
-
     self.tapGesture = [[UITapGestureRecognizer alloc]
         initWithTarget:self action:@selector(surfaceOnClick:)];
-    if (!self.isMacCatalystApp) {
-        self.tapGesture.allowedTouchTypes = @[@(UITouchTypeDirect)];
-    }
+    self.tapGesture.allowedTouchTypes = @[@(UITouchTypeDirect)];
     self.tapGesture.delegate = self;
     self.tapGesture.numberOfTapsRequired = 1;
     self.tapGesture.numberOfTouchesRequired = 1;
@@ -157,19 +148,22 @@ static GameSurfaceView* pojavWindow;
     self.doubleTapGesture.cancelsTouchesInView = NO;
     [self.touchView addGestureRecognizer:self.doubleTapGesture];
 
+    if (@available(iOS 13.0, *)) {
+        if (@available(iOS 14.0, *)) {
+            // Hover is handled in GCMouse callback
+        } else {
+            UIHoverGestureRecognizer *hoverGesture = [[UIHoverGestureRecognizer alloc]
+            initWithTarget:self action:@selector(surfaceOnHover:)];
+            [self.touchView addGestureRecognizer:hoverGesture];
+        }
+    }
+
     self.longPressGesture = [[UILongPressGestureRecognizer alloc]
         initWithTarget:self action:@selector(surfaceOnLongpress:)];
     self.longPressGesture.allowedTouchTypes = @[@(UITouchTypeDirect)];
     self.longPressGesture.cancelsTouchesInView = NO;
     self.longPressGesture.delegate = self;
     [self.touchView addGestureRecognizer:self.longPressGesture];
-    
-    self.longPressTwoGesture = [[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(keyboardGesture:)];
-    self.longPressTwoGesture.numberOfTouchesRequired = 2;
-    self.longPressTwoGesture.allowedTouchTypes = @[@(UITouchTypeDirect)];
-    self.longPressTwoGesture.cancelsTouchesInView = NO;
-    self.longPressTwoGesture.delegate = self;
-    [self.touchView addGestureRecognizer:self.longPressTwoGesture];
 
     self.scrollPanGesture = [[UIPanGestureRecognizer alloc]
         initWithTarget:self action:@selector(surfaceOnTouchesScroll:)];
@@ -179,12 +173,14 @@ static GameSurfaceView* pojavWindow;
     self.scrollPanGesture.maximumNumberOfTouches = 2;
     [self.touchView addGestureRecognizer:self.scrollPanGesture];
 
-    if (!isTVOS) {
-        [self.touchView addInteraction:[[NSClassFromString(@"UIPointerInteraction") alloc] initWithDelegate:self]];
+    if (@available(iOS 13.4, *)) {
+        if (!isTVOS) {
+            [self.touchView addInteraction:[[UIPointerInteraction alloc] initWithDelegate:self]];
+        }
     }
 
     // Virtual mouse
-    virtualMouseEnabled = getPrefBool(@"control.virtmouse_enable");
+    virtualMouseEnabled = [getPreference(@"virtmouse_enable") boolValue];
     virtualMouseFrame = CGRectMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2, 18, 27);
     self.mousePointerView = [[UIImageView alloc] initWithFrame:virtualMouseFrame];
     self.mousePointerView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleRightMargin |UIViewAutoresizingFlexibleBottomMargin;
@@ -194,7 +190,11 @@ static GameSurfaceView* pojavWindow;
     [self.touchView addSubview:self.mousePointerView];
 
     self.inputTextField = [[TrackedTextField alloc] initWithFrame:CGRectMake(0, -32.0, self.view.frame.size.width, 30.0)];
-    self.inputTextField.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    if (@available(iOS 13.0, *)) {
+        self.inputTextField.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    } else {
+        self.inputTextField.backgroundColor = UIColor.groupTableViewBackgroundColor;
+    }
     self.inputTextField.delegate = self;
     self.inputTextField.font = [UIFont fontWithName:@"Menlo-Regular" size:20];
     self.inputTextField.clearsOnBeginEditing = YES;
@@ -209,37 +209,39 @@ static GameSurfaceView* pojavWindow;
         CallbackBridge_nativeSendKey(key, scancode, action, mods);
     };
 
+    NSString *controlFilePath = [NSString stringWithFormat:@"%s/controlmap/%@", getenv("POJAV_HOME"), (NSString *)getPreference(@"default_ctrl")];
+
     self.swipeableButtons = [[NSMutableArray alloc] init];
 
     [KeyboardInput initKeycodeTable];
-    self.mouseConnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCMouseDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-        NSLog(@"Input: Mouse connected!");
-        GCMouse* mouse = note.object;
-        [self registerMouseCallbacks:mouse];
-        self.mousePointerView.hidden = isGrabbing;
-        virtualMouseEnabled = YES;
-        [self setNeedsUpdateOfPrefersPointerLocked];
-        if (getPrefBool(@"control.hardware_hide")) {
-            self.ctrlView.hidden = YES;
+    if (@available(iOS 14.0, tvOS 14.0, *)) {
+        self.mouseConnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCMouseDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+            NSLog(@"Input: Mouse connected!");
+            GCMouse* mouse = note.object;
+            [self registerMouseCallbacks:mouse];
+            self.mousePointerView.hidden = isGrabbing;
+            virtualMouseEnabled = YES;
+            [self setNeedsUpdateOfPrefersPointerLocked];
+            if([getPreference(@"hardware_hide") boolValue]) {
+                self.ctrlView.hidden = YES;
+            }
+        }];
+        self.mouseDisconnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+            NSLog(@"Input: Mouse disconnected!");
+            GCMouse* mouse = note.object;
+            mouse.mouseInput.mouseMovedHandler = nil;
+            mouse.mouseInput.leftButton.pressedChangedHandler = nil;
+            mouse.mouseInput.middleButton.pressedChangedHandler = nil;
+            mouse.mouseInput.rightButton.pressedChangedHandler = nil;
+            [self setNeedsUpdateOfPrefersPointerLocked];
+            if([getPreference(@"hardware_hide") boolValue]) {
+                self.ctrlView.hidden = NO;
+            }
+        }];
+        if (GCMouse.current != nil) {
+            [self registerMouseCallbacks: GCMouse.current];
         }
-    }];
-    self.mouseDisconnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCMouseDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-        NSLog(@"Input: Mouse disconnected!");
-        GCMouse* mouse = note.object;
-        mouse.mouseInput.mouseMovedHandler = nil;
-        mouse.mouseInput.leftButton.pressedChangedHandler = nil;
-        mouse.mouseInput.middleButton.pressedChangedHandler = nil;
-        mouse.mouseInput.rightButton.pressedChangedHandler = nil;
-        [mouse.mouseInput.auxiliaryButtons makeObjectsPerformSelector:@selector(setPressedChangedHandler:) withObject:nil];
-        [self setNeedsUpdateOfPrefersPointerLocked];
-        if (getPrefBool(@"controll.hardware_hide")) {
-            self.ctrlView.hidden = NO;
-        }
-    }];
-    if (GCMouse.current != nil) {
-        [self registerMouseCallbacks: GCMouse.current];
     }
-    
 
     // TODO: deal with multiple controllers by letting users decide which one to use?
     self.controllerConnectCallback = [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
@@ -249,7 +251,7 @@ static GameSurfaceView* pojavWindow;
         [ControllerInput registerControllerCallbacks:controller];
         self.mousePointerView.hidden = isGrabbing;
         virtualMouseEnabled = YES;
-        if (getPrefBool(@"control.hardware_hide")) {
+        if([getPreference(@"hardware_hide") boolValue]) {
             self.ctrlView.hidden = YES;
         }
     }];
@@ -257,12 +259,11 @@ static GameSurfaceView* pojavWindow;
         NSLog(@"Input: Controller disconnected!");
         GCController* controller = note.object;
         [ControllerInput unregisterControllerCallbacks:controller];
-        if (getPrefBool(@"control.hardware_hide")) {
+        if([getPreference(@"hardware_hide") boolValue]) {
             self.ctrlView.hidden = NO;
         }
     }];
     if (GCController.controllers.count == 1) {
-        [ControllerInput initKeycodeTable];
         [ControllerInput registerControllerCallbacks:GCController.controllers.firstObject];
     }
 
@@ -273,11 +274,20 @@ static GameSurfaceView* pojavWindow;
     // [self setPreferredFramesPerSecond:1000];
     [self updateJetsamControl];
     [self updatePreferenceChanges];
-    [self loadCustomControls];
+    [self executebtn_special_togglebtn:0];
 
-    if (UIApplication.sharedApplication.connectedScenes.count > 1 &&
-      getPrefBool(@"video.fullscreen_airplay")) {
-        [self switchToExternalDisplay];
+#ifdef INTERNAL_VIRTUAL_JOYSTICK
+    // just for testing
+    ControlJoystick *joystick = ControlJoystick.buttonWithDefaultProperties;
+    [self.ctrlView addSubview:joystick];
+    [joystick update];
+#endif
+
+    if (@available(iOS 13.0, *)) {
+        if (UIApplication.sharedApplication.connectedScenes.count > 1 &&
+            [getPreference(@"fullscreen_airplay") boolValue]) {
+            [self switchToExternalDisplay];
+        }
     }
 
     [self launchMinecraft];
@@ -285,25 +295,27 @@ static GameSurfaceView* pojavWindow;
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    [self setNeedsUpdateOfPrefersPointerLocked];
+    if (@available(iOS 14.0, *)) {
+        [self setNeedsUpdateOfPrefersPointerLocked];
+    }
 }
 
 - (void)updateAudioSettings {
     NSError *sessionError = nil;
     AVAudioSessionCategory category;
-    AVAudioSessionCategoryOptions options = 0;
-    if(getPrefBool(@"video.silence_with_switch")) {
+    AVAudioSessionCategoryOptions options;
+    if([getPreference(@"silence_with_switch") boolValue]) {
         category = AVAudioSessionCategorySoloAmbient;
     } else {
-        category = AVAudioSessionCategoryPlayAndRecord;
-        options |= AVAudioSessionCategoryOptionAllowAirPlay | AVAudioSessionCategoryOptionAllowBluetooth | AVAudioSessionCategoryOptionAllowBluetoothA2DP | AVAudioSessionCategoryOptionDefaultToSpeaker;
+        category = AVAudioSessionCategoryPlayback;
     }
-    if(!getPrefBool(@"video.silence_other_audio")) {
-        options |= AVAudioSessionCategoryOptionMixWithOthers;
+    if([getPreference(@"silence_other_audio") boolValue]) {
+        options = 0;
+    } else {
+        options = AVAudioSessionCategoryOptionMixWithOthers;
     }
-    AVAudioSession *session = AVAudioSession.sharedInstance;
-    [session setCategory:category withOptions:options error:&sessionError];
-    [session setActive:YES error:&sessionError];
+    [[AVAudioSession sharedInstance] setCategory:category withOptions:options error:&sessionError];
+    [[AVAudioSession sharedInstance] setActive:YES error:&sessionError];
 }
 
 - (void)updateJetsamControl {
@@ -311,7 +323,7 @@ static GameSurfaceView* pojavWindow;
         return;
     }
     // More 1024MB is necessary for other memory regions (native, Java GC, etc.)
-    int limit = getPrefInt(@"java.allocated_memory") + 1024;
+    int limit = [getPreference(@"allocated_memory") intValue] + 1024;
     if (memorystatus_control(MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT, getpid(), limit, NULL, 0) == -1) {
         NSLog(@"Failed to set Jetsam task limit: error: %s", strerror(errno));
     } else {
@@ -321,67 +333,62 @@ static GameSurfaceView* pojavWindow;
 
 - (void)updatePreferenceChanges {
     // Update UITextField auto correction
-    if (getPrefBool(@"debug.debug_auto_correction")) {
+    if ([getPreference(@"debug_auto_correction") boolValue]) {
         self.inputTextField.autocorrectionType = UITextAutocorrectionTypeDefault;
     } else {
         self.inputTextField.autocorrectionType = UITextAutocorrectionTypeNo;
     }
 
-    BOOL gyroEnabled = getPrefBool(@"control.gyroscope_enable");
-    BOOL gyroInvertX = getPrefBool(@"control.gyroscope_invert_x_axis");
-    int gyroSensitivity = getPrefInt(@"control.gyroscope_sensitivity");
+    BOOL gyroEnabled = [getPreference(@"gyroscope_enable") boolValue];
+    BOOL gyroInvertX = [getPreference(@"gyroscope_invert_x_axis") boolValue];
+    int gyroSensitivity = [getPreference(@"gyroscope_sensitivity") intValue];
     [GyroInput updateSensitivity:gyroEnabled?gyroSensitivity:0 invertXAxis:gyroInvertX];
 
-    self.mouseSpeed = getPrefFloat(@"control.mouse_speed") / 100.0;
+    self.mouseSpeed = [getPreference(@"mouse_speed") floatValue] / 100.0;
 
-    virtualMouseEnabled = getPrefBool(@"control.virtmouse_enable");
+    virtualMouseEnabled = [getPreference(@"virtmouse_enable") boolValue];
     self.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
 
     // Update virtual mouse scale
-    CGFloat mouseScale = getPrefFloat(@"control.mouse_scale") / 100.0;
+    CGFloat mouseScale = [getPreference(@"mouse_scale") floatValue] / 100.0;
     virtualMouseFrame = CGRectMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2, 18.0 * mouseScale, 27 * mouseScale);
     self.mousePointerView.frame = virtualMouseFrame;
 
-    self.shouldHideControlsFromRecording = getPrefFloat(@"control.recording_hide");
-    [self.ctrlView hideViewFromCapture:self.shouldHideControlsFromRecording];
     self.ctrlView.frame = getSafeArea();
+    [self loadCustomControls];
 
     // Update gestures state
-    self.slideableHotbar = getPrefBool(@"control.slideable_hotbar");
-    self.enableMouseGestures = getPrefBool(@"control.gesture_mouse");
-    self.enableHotbarGestures = getPrefBool(@"control.gesture_hotbar");
-    self.shouldTriggerHaptic = !getPrefBool(@"control.disable_haptics");
+    slideableHotbar = [getPreference(@"slideable_hotbar") boolValue];
+    self.enableMouseGestures = [getPreference(@"gesture_mouse") boolValue];
+    self.enableHotbarGestures = [getPreference(@"gesture_hotbar") boolValue];
 
     self.scrollPanGesture.enabled = self.enableMouseGestures;
     self.doubleTapGesture.enabled = self.enableHotbarGestures;
-    self.longPressGesture.minimumPressDuration = getPrefFloat(@"control.press_duration") / 1000.0;
+    self.longPressGesture.minimumPressDuration = [getPreference(@"press_duration") floatValue] / 1000.0;
 
     // Update audio settings
     [self updateAudioSettings];
     // Update resolution
     [self updateSavedResolution];
-    // Update performance HUD visibility
-    if (@available(iOS 16, tvOS 16, *)) {
-        if ([self.surfaceView.layer isKindOfClass:CAMetalLayer.class]) {
-            BOOL perfHUDEnabled = getPrefBool(@"video.performance_hud");
-            ((CAMetalLayer *)self.surfaceView.layer).developerHUDProperties = perfHUDEnabled ? @{@"mode": @"default"} : nil;
-        }
-    }
 }
 
 - (void)updateSavedResolution {
-    for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes.allObjects) {
-        self.screenScale = scene.screen.scale;
-        if (scene.session.role != UIWindowSceneSessionRoleApplication) {
-            break;
+    if (@available(iOS 13.0, *)) {
+        for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes.allObjects) {
+            self.screenScale = scene.screen.scale;
+            if (scene.session.role != UIWindowSceneSessionRoleApplication) {
+                break;
+            }
         }
+    } else {
+        self.screenScale = UIScreen.mainScreen.scale;
     }
 
     if (self.surfaceView.superview != nil) {
         self.surfaceView.frame = self.surfaceView.superview.frame;
     }
 
-    resolutionScale = getPrefFloat(@"video.resolution") / 100.0;
+    resolutionScale = [getPreference(@"resolution") floatValue] / 100.0;
     self.surfaceView.layer.contentsScale = self.screenScale * resolutionScale;
 
     physicalWidth = roundf(self.surfaceView.frame.size.width * self.screenScale);
@@ -398,62 +405,24 @@ static GameSurfaceView* pojavWindow;
     CallbackBridge_nativeSendScreenSize(windowWidth, windowHeight);
 }
 
-- (void)updateControlHiddenState:(BOOL)hide {
-    for (UIView *view in self.ctrlView.subviews) {
-        ControlButton *button = (ControlButton *)view;
-        if (!button.canBeHidden) continue;
-        BOOL hidden = hide || !(
-            (isGrabbing && [button.properties[@"displayInGame"] boolValue]) ||
-            (!isGrabbing && [button.properties[@"displayInMenu"] boolValue]));
-        if (!hidden && ![button isKindOfClass:ControlSubButton.class]) {
-            button.hidden = hidden;
-            if ([button isKindOfClass:ControlDrawer.class]) {
-                [(ControlDrawer *)button restoreButtonVisibility];
-            }
-        } else if (hidden) {
-            button.hidden = hidden;
-        }
-    }
-}
-
-- (void)updateGrabState {
-    // Update cursor position
-    if (isGrabbing == JNI_TRUE) {
-        CGFloat screenScale = self.surfaceView.layer.contentsScale;
-        CallbackBridge_nativeSendCursorPos(ACTION_DOWN, lastVirtualMousePoint.x * screenScale, lastVirtualMousePoint.y * screenScale);
-        virtualMouseFrame.origin.x = self.view.frame.size.width / 2;
-        virtualMouseFrame.origin.y = self.view.frame.size.height / 2;
-        self.mousePointerView.frame = virtualMouseFrame;
-    }
-    self.scrollPanGesture.enabled = !isGrabbing;
-    self.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
-
-    // Update buttons visibility
-    [self updateControlHiddenState:NO];
-}
-
 - (void)launchMinecraft {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        int minVersion = [self.metadata[@"javaVersion"][@"majorVersion"] intValue];
-        if (minVersion == 0) {
-            minVersion = [self.metadata[@"javaVersion"][@"version"] intValue];
-        }
-        launchJVM(
-            BaseAuthenticator.current.authData[@"username"],
-            self.metadata,
-            windowWidth, windowHeight,
-            minVersion
-        );
+        [MinecraftResourceUtils downloadClientJson:getPreference(@"selected_version") progress:nil callback:nil success:^(NSMutableDictionary *json) {
+            [MinecraftResourceUtils processJVMArgs:json];
+            launchJVM(
+                BaseAuthenticator.current.authData[@"username"],
+                json,
+                windowWidth, windowHeight,
+                [json[@"javaVersion"][@"majorVersion"] intValue]
+            );
+        }];
     });
 }
 
 - (void)loadCustomControls {
     self.edgeGesture.enabled = YES;
     [self.swipeableButtons removeAllObjects];
-    NSString *controlFile = [PLProfiles resolveKeyForCurrentProfile:@"defaultTouchCtrl"];
-    [self.ctrlView loadControlFile:controlFile];
-
-    ControlButton *menuButton;
+    [self.ctrlView loadControlFile:getPreference(@"default_ctrl")];
     for (ControlButton *button in self.ctrlView.subviews) {
         BOOL isSwipeable = [button.properties[@"isSwipeable"] boolValue];
 
@@ -461,10 +430,8 @@ static GameSurfaceView* pojavWindow;
         BOOL isMenuButton = NO;
         for (int i = 0; i < 4; i++) {
             int keycodeInt = [button.properties[@"keycodes"][i] intValue];
-            button.canBeHidden &= keycodeInt != SPECIALBTN_TOGGLECTRL && keycodeInt != SPECIALBTN_VIRTUALMOUSE;
-            if (keycodeInt == SPECIALBTN_MENU) {
-                menuButton = button;
-            }
+            button.canBeHidden &= keycodeInt != SPECIALBTN_TOGGLECTRL;
+            isMenuButton |= keycodeInt == SPECIALBTN_MENU;
         }
 
         [button addTarget:self action:@selector(executebtn_down:) forControlEvents:UIControlEventTouchDown];
@@ -477,21 +444,20 @@ static GameSurfaceView* pojavWindow;
             [button addGestureRecognizer:panRecognizerButton];
             [self.swipeableButtons addObject:button];
         }
-    }
 
-    [self updateControlHiddenState:self.toggleHidden];
-
-    if (menuButton) {
-        NSMutableArray *items = [NSMutableArray new];
-        for (int i = 0; i < self.menuArray.count; i++) {
-            UIAction *item = [UIAction actionWithTitle:localize(self.menuArray[i], nil) image:nil identifier:nil
-                handler:^(id action) {[self didSelectMenuItem:i];}];
-            [items addObject:item];
+        if (@available(iOS 14, *)) {
+            if (!isMenuButton) continue;
+            NSMutableArray *items = [NSMutableArray new];
+            for (int i = 0; i < self.menuArray.count; i++) {
+                UIAction *item = [UIAction actionWithTitle:localize(self.menuArray[i], nil) image:nil identifier:nil
+                    handler:^(id action) {[self didSelectMenuItem:i];}];
+                [items addObject:item];
+            }
+            button.menu = [UIMenu menuWithTitle:@"" image:nil identifier:nil
+                options:UIMenuOptionsDisplayInline children:items];
+            button.showsMenuAsPrimaryAction = YES;
+            self.edgeGesture.enabled = NO;
         }
-        menuButton.menu = [UIMenu menuWithTitle:@"" image:nil identifier:nil
-            options:UIMenuOptionsDisplayInline children:items];
-        menuButton.showsMenuAsPrimaryAction = YES;
-        self.edgeGesture.enabled = NO;
     }
 }
 
@@ -558,19 +524,6 @@ static GameSurfaceView* pojavWindow;
     return YES;
 }
 
-- (void)keyboardGesture:(UIGestureRecognizer*)gestureRecognizer {
-    if (gestureRecognizer.state == UIGestureRecognizerStateBegan) {
-        if (self.inputTextField.isFirstResponder) {
-            [self.inputTextField resignFirstResponder];
-            self.inputTextField.alpha = 1.0f;
-        } else {
-            [self.inputTextField becomeFirstResponder];
-            // Insert an undeletable space
-            self.inputTextField.text = @" ";
-        }
-    }
-}
-
 - (void)sendTouchEvent:(UITouch *)touchEvent withUIEvent:(UIEvent *)uievent withEvent:(int)event
 {
     CGPoint locationInView = [touchEvent locationInView:self.rootView];
@@ -589,7 +542,7 @@ static GameSurfaceView* pojavWindow;
                 break;
         }
 
-        if (touchEvent == self.hotbarTouch && self.slideableHotbar && ![self isTouchInactive:self.hotbarTouch]) {
+        if (touchEvent == self.hotbarTouch && slideableHotbar && ![self isTouchInactive:self.hotbarTouch]) {
             CGFloat screenScale = [[UIScreen mainScreen] scale];
             int slot = self.enableHotbarGestures ?
             callback_SurfaceViewController_touchHotbar(locationInView.x * screenScale, locationInView.y * screenScale) : -1;
@@ -629,12 +582,13 @@ static GameSurfaceView* pojavWindow;
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled = NO;
 
-    for (UIPress *press in presses) {
-        if (press.key != nil && [KeyboardInput sendKeyEvent:press.key down:YES]) {
-            handled = YES;
+    if (@available(iOS 13.4, *)) {
+        for (UIPress *press in presses) {
+            if (press.key != nil && [KeyboardInput sendKeyEvent:press.key down:YES]) {
+                handled = YES;
+            }
         }
     }
-    
 
     if (!handled) {
         [super pressesBegan:presses withEvent:event];
@@ -644,12 +598,13 @@ static GameSurfaceView* pojavWindow;
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled = NO;
 
-    for (UIPress *press in presses) {
-        if (press.key != nil && [KeyboardInput sendKeyEvent:press.key down:NO]) {
-            handled = YES;
+    if (@available(iOS 13.4, *)) {
+        for (UIPress *press in presses) {
+            if (press.key != nil && [KeyboardInput sendKeyEvent:press.key down:NO]) {
+                handled = YES;
+            }
         }
     }
-    
 
     if (!handled) {
         [super pressesEnded:presses withEvent:event];
@@ -660,7 +615,7 @@ static GameSurfaceView* pojavWindow;
     return GCMouse.mice.count > 0;
 }
 
-- (void)registerMouseCallbacks:(GCMouse *)mouse {
+- (void)registerMouseCallbacks:(GCMouse *)mouse API_AVAILABLE(ios(14.0)) {
     NSLog(@"Input: Got mouse %@", mouse);
     mouse.mouseInput.mouseMovedHandler = ^(GCMouseInput * _Nonnull mouse, float deltaX, float deltaY) {
         if (!self.view.window.windowScene.pointerLockState.locked) {
@@ -684,12 +639,6 @@ static GameSurfaceView* pojavWindow;
     mouse.mouseInput.rightButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
         CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_RIGHT, pressed, 0);
     };
-    // GLFW can handle up to 8 mouse buttons, the first 3 buttons are reserved for left,middle,right
-    for (int i = 0; i < MIN(mouse.mouseInput.auxiliaryButtons.count, 5); i++) {
-        mouse.mouseInput.auxiliaryButtons[i].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-            CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_4 + i, pressed, 0);
-        };
-    }
 
     mouse.mouseInput.scroll.xAxis.valueChangedHandler = ^(GCControllerAxisInput * _Nonnull axis, float value) {
         // Workaround MC-121772 (macOS/iOS feature)
@@ -703,15 +652,15 @@ static GameSurfaceView* pojavWindow;
 
 - (void)surfaceOnClick:(UITapGestureRecognizer *)sender {
     if (sender.state == UIGestureRecognizerStateBegan || sender.state == UIGestureRecognizerStateEnded){
-        if(self.shouldTriggerHaptic) {
-            [self.lightHaptic impactOccurred];
-        }
+        [self.lightHaptic impactOccurred];
     }
     
     if (!self.shouldTriggerClick) return;
 
     if (sender.state == UIGestureRecognizerStateRecognized) {
         if (currentHotbarSlot == -1) {
+            inputTextLength = 0;
+
             if (!self.enableMouseGestures) return;
             CallbackBridge_nativeSendMouseButton(isGrabbing == JNI_TRUE ?
                 GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT, 1, 0);
@@ -728,9 +677,7 @@ static GameSurfaceView* pojavWindow;
 
 - (void)surfaceOnDoubleClick:(UITapGestureRecognizer *)sender {
     if (sender.state == UIGestureRecognizerStateBegan || sender.state == UIGestureRecognizerStateEnded){
-        if(self.shouldTriggerHaptic) {
-            [self.lightHaptic impactOccurred];
-        }
+        [self.lightHaptic impactOccurred];
     }
     
     if (sender.state == UIGestureRecognizerStateRecognized && isGrabbing) {
@@ -745,9 +692,14 @@ static GameSurfaceView* pojavWindow;
     }
 }
 
-- (void)surfaceOnHover:(UIGestureRecognizer *)sender {
-    if (isGrabbing) return;
+- (void)surfaceOnHover:(UIHoverGestureRecognizer *)sender API_AVAILABLE(ios(13.0)) {
+    if (sender.state == UIGestureRecognizerStateBegan || sender.state == UIGestureRecognizerStateEnded){
+        [self.lightHaptic impactOccurred];
+    }
     
+    if (@available(iOS 14.0, *)) {
+        if (isGrabbing) return;
+    }
     CGPoint point = [sender locationInView:self.rootView];
     // NSLog(@"Mouse move!!");
     // NSLog(@"Mouse pos = %f, %f", point.x, point.y);
@@ -771,12 +723,10 @@ static GameSurfaceView* pojavWindow;
 -(void)surfaceOnLongpress:(UILongPressGestureRecognizer *)sender
 {
     if (sender.state == UIGestureRecognizerStateBegan || sender.state == UIGestureRecognizerStateEnded){
-        if(self.shouldTriggerHaptic) {
-            [self.mediumHaptic impactOccurred];
-        }
+        [self.mediumHaptic impactOccurred];
     }
     
-    if (!self.slideableHotbar) {
+    if (!slideableHotbar) {
         CGPoint location = [sender locationInView:self.rootView];
         CGFloat screenScale = UIScreen.mainScreen.scale;
         currentHotbarSlot = self.enableHotbarGestures ?
@@ -785,6 +735,7 @@ static GameSurfaceView* pojavWindow;
     if (sender.state == UIGestureRecognizerStateBegan) {
         self.shouldTriggerClick = NO;
         if (currentHotbarSlot == -1) {
+            inputTextLength = 0;
 
             if (self.enableMouseGestures)
                 CallbackBridge_nativeSendMouseButton(GLFW_MOUSE_BUTTON_LEFT, 1, 0);
@@ -808,9 +759,7 @@ static GameSurfaceView* pojavWindow;
 
 - (void)surfaceOnTouchesScroll:(UIPanGestureRecognizer *)sender {
     if (sender.state == UIGestureRecognizerStateBegan || sender.state == UIGestureRecognizerStateEnded){
-        if(self.shouldTriggerHaptic) {
-            [self.lightHaptic impactOccurred];
-        }
+        [self.lightHaptic impactOccurred];
     }
     
     if (isGrabbing) return;
@@ -819,17 +768,17 @@ static GameSurfaceView* pojavWindow;
         sender.state == UIGestureRecognizerStateEnded) {
         CGPoint velocity = [sender velocityInView:self.rootView];
         if (velocity.x != 0.0f || velocity.y != 0.0f) {
-            CallbackBridge_nativeSendScroll(velocity.x/self.view.frame.size.width, velocity.y/self.view.frame.size.height);
+            CallbackBridge_nativeSendScroll(velocity.x/100.0, velocity.y/100.0);
         }
     }
 }
 
-- (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion {
+- (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction regionForRequest:(UIPointerRegionRequest *)request defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) API_AVAILABLE(ios(13.4)) API_AVAILABLE(ios(13.4)){
     return nil;
 }
 
-- (UIPointerStyle *)pointerInteraction:(UIPointerInteraction *)interaction styleForRegion:(UIPointerRegion *)region {
-    return [NSClassFromString(@"UIPointerStyle") hiddenPointerStyle];
+- (UIPointerStyle *)pointerInteraction:(UIPointerInteraction *)interaction styleForRegion:(UIPointerRegion *)region  API_AVAILABLE(ios(13.4)){
+    return [UIPointerStyle hiddenPointerStyle];
 }
 
 #pragma mark - Input view stuff
@@ -843,6 +792,7 @@ static GameSurfaceView* pojavWindow;
 
 #pragma mark - On-screen button functions
 
+int currentVisibility = 1;
 - (void)executebtn:(ControlButton *)sender withAction:(int)action {
     int held = action == ACTION_DOWN;
     for (int i = 0; i < 4; i++) {
@@ -858,6 +808,7 @@ static GameSurfaceView* pojavWindow;
                             [self.inputTextField becomeFirstResponder];
                             // Insert an undeletable space
                             self.inputTextField.text = @" ";
+                            inputTextLength = 0;
                         }
                     }
                     break;
@@ -894,7 +845,7 @@ static GameSurfaceView* pojavWindow;
                     if (!isGrabbing && !held) {
                         virtualMouseEnabled = !virtualMouseEnabled;
                         self.mousePointerView.hidden = !virtualMouseEnabled;
-                        setPrefBool(@"control.virtmouse_enable", virtualMouseEnabled);
+                        setPreference(@"virtmouse_enable", @(virtualMouseEnabled));
                     }
                     break;
 
@@ -919,9 +870,7 @@ static GameSurfaceView* pojavWindow;
 
 - (void)executebtn_down:(ControlButton *)sender
 {
-    if(self.shouldTriggerHaptic) {
-        [self.lightHaptic impactOccurred];
-    }
+    [self.lightHaptic impactOccurred];
     
     if (sender.savedBackgroundColor == nil) {
         [self executebtn:sender withAction:ACTION_DOWN];
@@ -970,10 +919,8 @@ static GameSurfaceView* pojavWindow;
         sender.backgroundColor = sender.savedBackgroundColor;
         [self executebtn:sender withAction:ACTION_UP];
     }
-
-    if(self.shouldTriggerHaptic) {
-        [self.lightHaptic impactOccurred];
-    }
+    
+    [self.lightHaptic impactOccurred];
 }
 
 - (void)executebtn_up_inside:(ControlButton *)sender {
@@ -985,9 +932,22 @@ static GameSurfaceView* pojavWindow;
 }
 
 - (void)executebtn_special_togglebtn:(int)held {
-    if (held) return;
-    self.toggleHidden = !self.toggleHidden;
-    [self updateControlHiddenState:self.toggleHidden];
+    if (held == 0) {
+        currentVisibility = !currentVisibility;
+        for (UIView *view in self.ctrlView.subviews) {
+            ControlButton *button = (ControlButton *)view;
+            if (button.canBeHidden) {
+                if (!currentVisibility && ![button isKindOfClass:[ControlSubButton class]]) {
+                    button.hidden = currentVisibility;
+                    if ([button isKindOfClass:[ControlDrawer class]]) {
+                        [(ControlDrawer *)button restoreButtonVisibility];
+                    }
+                } else if (currentVisibility) {
+                    button.hidden = currentVisibility;
+                }
+            }
+        }
+    }
 }
 
 #pragma mark - Input: On-screen touch events
@@ -999,8 +959,10 @@ int touchesMovedCount;
     [super touchesBegan:touches withEvent:event];
     int i = 0;
     for (UITouch *touch in touches) {
-        if (!self.isMacCatalystApp && touch.type == UITouchTypeIndirectPointer) {
-            continue; // handle this in a different place
+        if (@available(iOS 14.0, *)) { // 13.4
+            if (touch.type == UITouchTypeIndirectPointer) {
+                continue; // handle this in a different place
+            }
         }
         CGPoint locationInView = [touch locationInView:self.rootView];
         CGFloat screenScale = [[UIScreen mainScreen] scale];
@@ -1024,8 +986,10 @@ int touchesMovedCount;
     [super touchesMoved:touches withEvent:event];
 
     for (UITouch *touch in touches) {
-        if (!self.isMacCatalystApp && touch.type == UITouchTypeIndirectPointer) {
-            continue; // handle this in a different place
+        if (@available(iOS 14.0, *)) { // 13.4
+            if (touch.type == UITouchTypeIndirectPointer) {
+                continue; // handle this in a different place
+            }
         }
         if (self.hotbarTouch != touch && [self isTouchInactive:self.primaryTouch]) {
             // Replace the inactive touch with the current active touch
@@ -1040,8 +1004,10 @@ int touchesMovedCount;
 - (void)touchesEndedGlobal:(NSSet *)touches withEvent:(UIEvent *)event
 {
     for (UITouch *touch in touches) {
-        if (!self.isMacCatalystApp && touch.type == UITouchTypeIndirectPointer) {
-            continue; // handle this in a different place
+        if (@available(iOS 14.0, *)) { // 13.4
+            if (touch.type == UITouchTypeIndirectPointer) {
+                continue; // handle this in a different place
+            }
         }
         [self sendTouchEvent:touch withUIEvent:event withEvent:ACTION_UP];
     }
@@ -1062,11 +1028,7 @@ int touchesMovedCount;
 }
 
 + (BOOL)isRunning {
-    return [UIWindow.mainWindow.rootViewController isKindOfClass:SurfaceViewController.class];
-}
-
-+ (GameSurfaceView *)surface {
-    return pojavWindow;
+    return [currentWindow().rootViewController isKindOfClass:SurfaceViewController.class];
 }
 
 @end

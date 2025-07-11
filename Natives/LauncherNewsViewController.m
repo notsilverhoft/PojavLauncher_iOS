@@ -4,18 +4,15 @@
 #import "LauncherPreferences.h"
 #import "utils.h"
 
+#define sidebarNavController ((UINavigationController *)self.splitViewController.viewControllers[0])
+#define sidebarViewController ((LauncherMenuViewController *)sidebarNavController.viewControllers[0])
+
 @interface LauncherNewsViewController()<WKNavigationDelegate>
 @end
 
 @implementation LauncherNewsViewController
 WKWebView *webView;
 UIEdgeInsets insets;
-
-- (id)init {
-    self = [super init];
-    self.title = localize(@"News", nil);
-    return self;
-}
 
 - (NSString *)imageName {
     return @"MenuNews";
@@ -45,11 +42,34 @@ UIEdgeInsets insets;
     [webView loadRequest:request];
     [self.view addSubview:webView];
 
-    if(!isJailbroken && getPrefBool(@"warnings.limited_ram_warn") && (roundf(NSProcessInfo.processInfo.physicalMemory / 0x1000000) < 3900)) {
-        // "This device has a limited amount of memory available."
-        [self showWarningAlert:@"limited_ram" hasPreference:YES];
+    // Legacy device and iOS warnings.
+    // To be removed in the next release of PojavLauncher.
+    
+    if(@available(iOS 14.0, *)) {
+        if(!getenv("POJAV_DETECTEDJB") && [getPreference(@"limited_ram_warn") boolValue] == YES && (roundf(NSProcessInfo.processInfo.physicalMemory / 1048576) < 32900)) {
+            // "This device has a limited amount of memory available."
+            [self showWarningAlert:@"limited_ram" hasPreference:YES];
+        }
+    } else {
+        if(getenv("POJAV_DETECTED_LEGACY") && [getPreference(@"legacy_device_warn") boolValue]) {
+            // "The next release of PojavLauncher will not be compatible with this device."
+            [self showWarningAlert:@"legacy_device" hasPreference:YES];
+        }
+        
+        if(!getenv("POJAV_DETECTED_LEGACY") && ([getPreference(@"legacy_version_counter") intValue] == 0)) {
+            // "The next release of PojavLauncher will require a system update."
+            [self showWarningAlert:@"legacy_ios" hasPreference:NO];
+            
+            int launchNum = [getPreference(@"legacy_version_counter") intValue];
+            if(launchNum > 0) {
+               setPreference(@"legacy_version_counter", @(launchNum - 1));
+            } else {
+               setPreference(@"legacy_version_counter", @(30));
+            }
+        }
     }
-
+    
+    self.title = localize(@"News", nil);
     self.navigationItem.leftBarButtonItem = self.splitViewController.displayModeButtonItem;
     self.navigationItem.rightBarButtonItem = [sidebarViewController drawAccountButton];
     self.navigationItem.leftItemsSupplementBackButton = true;
@@ -64,7 +84,7 @@ UIEdgeInsets insets;
     UIAlertAction *action;
     if(isPreferenced) {
         action = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction * action) {
-            setPrefBool([NSString stringWithFormat:@"warnings.%@_warn", key], NO);
+            setPreference([NSString stringWithFormat:@"%@_warn", key], @NO);
         }];
     } else {
         action = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleCancel handler:nil];

@@ -8,6 +8,14 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 
+@interface ATableViewCell : UITableViewCell
+@end
+
+@implementation ATableViewCell
+
+@end
+
+
 @interface AccountListViewController()<ASWebAuthenticationPresentationContextProviding>
 
 @property(nonatomic, strong) NSMutableArray *accountList;
@@ -90,11 +98,13 @@
         return;
     }
 
-    self.modalInPresentation = YES;
+    if (@available(iOS 13.0, *)) {
+        self.modalInPresentation = YES;
+    }
     self.tableView.userInteractionEnabled = NO;
     [self addActivityIndicatorTo:cell];
 
-    id callback = ^(id status, BOOL success) {
+    id callback = ^(NSString* status, BOOL success) {
         [self callbackMicrosoftAuth:status success:success forCell:cell];
     };
     [[BaseAuthenticator loadSavedName:self.accountList[indexPath.row][@"username"]] refreshTokenWithCallback:callback];
@@ -110,10 +120,6 @@
         if (self.whenDelete != nil) {
             self.whenDelete(str);
         }
-        NSString *xuid = self.accountList[indexPath.row][@"xuid"];
-        if (xuid) {
-            [MicrosoftAuthenticator clearTokenDataOfProfile:xuid];
-        }
         [fm removeItemAtPath:path error:nil];
         [self.accountList removeObjectAtIndex:indexPath.row];
         [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
@@ -127,15 +133,6 @@
     } else {
         return UITableViewCellEditingStyleDelete;
     }
-}
-
-- (NSDictionary *)parseQueryItems:(NSString *)url {
-    NSMutableDictionary *result = [NSMutableDictionary new];
-    NSArray<NSURLQueryItem *> *queryItems = [NSURLComponents componentsWithString:url].queryItems;
-    for (NSURLQueryItem *item in queryItems) {
-        result[item.name] = item.value;
-    }
-    return result;
 }
 
 - (void)actionAddAccount:(UITableViewCell *)sender {
@@ -158,8 +155,8 @@
 }
 
 - (void)actionLoginLocal:(UIView *)sender {
-    if (getPrefBool(@"warnings.local_warn")) {
-        setPrefBool(@"warnings.local_warn", NO);
+    if ([getPreference(@"local_warn") boolValue] == YES) {
+        setPreference(@"local_warn", @NO);
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"login.warn.title.localmode", nil) message:localize(@"login.warn.message.localmode", nil) preferredStyle:UIAlertControllerStyleActionSheet];
         alert.popoverPresentationController.sourceView = sender;
         alert.popoverPresentationController.sourceRect = sender.bounds;
@@ -181,9 +178,9 @@
             controller.message = localize(@"login.error.username.outOfRange", nil);
             [self presentViewController:controller animated:YES completion:nil];
         } else {
-            id callback = ^(id status, BOOL success) {
-                self.whenItemSelected();
+            id callback = ^(NSString* status, BOOL success) {
                 [self dismissViewControllerAnimated:YES completion:nil];
+                self.whenItemSelected();
             };
             [[[LocalAuthenticator alloc] initWithInput:usernameField.text] loginWithCallback:callback];
         }
@@ -202,43 +199,57 @@
     {
         if (callbackURL == nil) {
             if (error.code != ASWebAuthenticationSessionErrorCodeCanceledLogin) {
-                showDialog(localize(@"Error", nil), error.localizedDescription);
+                showDialog(self, localize(@"Error", nil), error.localizedDescription);
             }
             return;
         }
+        NSString *urlString = [callbackURL absoluteString];
         // NSLog(@"URL returned = %@", [callbackURL absoluteString]);
 
-        NSDictionary *queryItems = [self parseQueryItems:callbackURL.absoluteString];
-        if (queryItems[@"code"]) {
-            self.modalInPresentation = YES;
+        if ([urlString containsString:@"/auth/?code="]) {
+            if (@available(iOS 13.0, *)) {
+                self.modalInPresentation = YES;
+            }
             self.tableView.userInteractionEnabled = NO;
             [self addActivityIndicatorTo:sender];
-            id callback = ^(id status, BOOL success) {
-                if ([status isKindOfClass:NSString.class] && [status isEqualToString:@"DEMO"] && success) {
-                    showDialog(localize(@"login.warn.title.demomode", nil), localize(@"login.warn.message.demomode", nil));
+            NSArray *components = [urlString componentsSeparatedByString:@"/auth/?code="];
+            id callback = ^(NSString* status, BOOL success) {
+                if ([status isEqualToString:@"DEMO"] && success) {
+                    showDialog(self, localize(@"login.warn.title.demomode", nil), localize(@"login.warn.message.demomode", nil));
                 }
                 [self callbackMicrosoftAuth:status success:success forCell:sender];
             };
-            [[[MicrosoftAuthenticator alloc] initWithInput:queryItems[@"code"]] loginWithCallback:callback];
+            [[[MicrosoftAuthenticator alloc] initWithInput:components[1]] loginWithCallback:callback];
         } else {
-            if ([queryItems[@"error"] hasPrefix:@"access_denied"]) {
+            NSArray *components = [urlString componentsSeparatedByString:@"/auth/?error="];
+            if ([components[1] hasPrefix:@"access_denied"]) {
                 // Ignore access denial responses
                 return;
             }
-            showDialog(localize(@"Error", nil), queryItems[@"error_description"]);
+            NSString *outError = [components[1]
+                stringByReplacingOccurrencesOfString:@"&error_description=" withString:@": "];
+            outError = [outError stringByRemovingPercentEncoding];
+            showDialog(self, localize(@"Error", nil), outError);
         }
     }];
 
-    self.authVC.prefersEphemeralWebBrowserSession = YES;
-    self.authVC.presentationContextProvider = self;
+    if (@available(iOS 13.0, *)) {
+        self.authVC.prefersEphemeralWebBrowserSession = YES;
+        self.authVC.presentationContextProvider = self;
+    }
 
     if ([self.authVC start] == NO) {
-        showDialog(localize(@"Error", nil), @"Unable to open Safari");
+        showDialog(self, localize(@"Error", nil), @"Unable to open Safari");
     }
 }
 
 - (void)addActivityIndicatorTo:(UITableViewCell *)cell {
-    UIActivityIndicatorViewStyle indicatorStyle = UIActivityIndicatorViewStyleMedium;
+    UIActivityIndicatorViewStyle indicatorStyle;
+    if (@available(iOS 13.0, *)) {
+        indicatorStyle = UIActivityIndicatorViewStyleMedium;
+    } else {
+        indicatorStyle = UIActivityIndicatorViewStyleGray;
+    } 
     UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:indicatorStyle];
     cell.accessoryView = indicator;
     [indicator sizeToFit];
@@ -251,24 +262,22 @@
     cell.accessoryView = nil;
 }
 
-- (void)callbackMicrosoftAuth:(id)status success:(BOOL)success forCell:(UITableViewCell *)cell {
+- (void)callbackMicrosoftAuth:(NSString *)status success:(BOOL)success forCell:(UITableViewCell *)cell {
     if (status != nil) {
-        if (success) {
-            cell.detailTextLabel.text = status;
-        } else {
-            self.modalInPresentation = NO;
+        cell.detailTextLabel.text = status;
+        if (!success) {
+            if (@available(iOS 13.0, *)) {
+                self.modalInPresentation = NO;
+            }
             self.tableView.userInteractionEnabled = YES;
             [self removeActivityIndicatorFrom:cell];
-            cell.detailTextLabel.text = [status localizedDescription];
-            NSData *errorData = ((NSError *)status).userInfo[AFNetworkingOperationFailingURLResponseDataErrorKey];
-            NSString *errorStr = [[NSString alloc] initWithData:errorData encoding:NSUTF8StringEncoding];
-            NSLog(@"[MSA] Error: %@", errorStr);
-            showDialog(localize(@"Error", nil), errorStr);
+            NSLog(@"[MSA] Error: %@", status);
+            showDialog(self, localize(@"Error", nil), status);
         }
     } else if (success) {
-        self.whenItemSelected();
         [self removeActivityIndicatorFrom:cell];
         [self dismissViewControllerAnimated:YES completion:nil];
+        self.whenItemSelected();
     }
 }
 
@@ -278,7 +287,7 @@
 }
 
 #pragma mark - ASWebAuthenticationPresentationContextProviding
-- (ASPresentationAnchor)presentationAnchorForWebAuthenticationSession:(ASWebAuthenticationSession *)session {
+- (ASPresentationAnchor)presentationAnchorForWebAuthenticationSession:(ASWebAuthenticationSession *)session  API_AVAILABLE(ios(13.0)){
     return UIApplication.sharedApplication.windows.firstObject;
 }
 

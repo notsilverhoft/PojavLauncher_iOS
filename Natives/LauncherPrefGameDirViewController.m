@@ -2,7 +2,7 @@
 #import "LauncherPreferences.h"
 #import "LauncherPrefGameDirViewController.h"
 #import "NSFileManager+NRFileManager.h"
-#import "PLProfiles.h"
+#import "TOInsetGroupedTableView.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 
@@ -20,7 +20,7 @@
     self.array = [[NSMutableArray alloc] init];
     [self.array addObject:@"default"];
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.tableView = [[TOInsetGroupedTableView alloc] init];
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     self.tableView.sectionFooterHeight = 50;
 
@@ -38,16 +38,14 @@
 }
 
 - (void)changeSelectionTo:(NSString *)name {
-    if (getenv("DEMO_LOCK")) return;
-
-    setPrefObject(@"general.game_directory", name);
+    setPreference(@"game_directory", name);
     NSString *multidirPath = [NSString stringWithFormat:@"%s/instances/%@", getenv("POJAV_HOME"), name];
-    NSString *lasmPath = @(getenv("POJAV_GAME_DIR"));
+    NSString *lasmPath = [NSString stringWithFormat:@"%s/Library/Application Support/minecraft", getenv("POJAV_HOME")];
     [NSFileManager.defaultManager removeItemAtPath:lasmPath error:nil];
     [NSFileManager.defaultManager createSymbolicLinkAtPath:lasmPath withDestinationPath:multidirPath error:nil];
-    [NSFileManager.defaultManager changeCurrentDirectoryPath:lasmPath];
-    toggleIsolatedPref(NO);
-    [self.navigationController performSelector:@selector(reloadProfileList)];
+    if ([getPreference(@"selected_version_type") intValue] == 0) {
+        [(LauncherNavigationController *)self.navigationController reloadVersionList:0];
+    }
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -88,12 +86,13 @@
         });
     });
 
-    if ([getPrefObject(@"general.game_directory") isEqualToString:self.array[indexPath.row]]) {
+    if ([getPreference(@"game_directory") isEqualToString:self.array[indexPath.row]]) {
         cell.accessoryType = UITableViewCellAccessoryCheckmark;
     } else {
         cell.accessoryType = UITableViewCellAccessoryNone;
     }
-    
+
+    // TODO: display size in the detail label
     return cell;
 }
 
@@ -123,34 +122,56 @@ viewForFooterInSection:(NSInteger)section
     }
 }
 
+/*
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location
+{
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+        return [UIMenu menuWithTitle:self.array[indexPath.row] children:@[files, filza, santander]];
+    }];
+}
+*/
+
 - (id)createOpenScheme:(NSString *)scheme at:(NSString *)directory {
-    return ^(UIAction *action) {
-        [UIApplication.sharedApplication
-            openURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", scheme, directory]]
-            options:@{} completionHandler:nil];
-    };
+    if (@available(iOS 13.0, *)) {
+        return ^(UIAction *action) {
+            [UIApplication.sharedApplication
+                openURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", scheme, directory]]
+                options:@{} completionHandler:nil];
+        };
+    }
+    return nil;
 }
 
-- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point 
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point API_AVAILABLE(ios(13.0))
 {
+    // suppress warning
+    if (@available(iOS 13.0, *)) {}
+    else return nil;
+
     NSArray *menuItems;
     NSMutableArray *openItems = [[NSMutableArray alloc] init];
 
     NSString *directory = [NSString stringWithFormat:@"%s/instances/%@", getenv("POJAV_HOME"), self.array[indexPath.row]];
-    NSDictionary *apps = @{
-        @"shareddocuments": @"Files",
-        @"filza": @"Filza",
-        @"santander": @"Santander",
-    };
-    for (NSString *key in apps.allKeys) {
-        NSString *url = [NSString stringWithFormat:@"%@://", key];
-        if ([UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:url]]) {
-            [openItems addObject:[UIAction
-                actionWithTitle:apps[key]
-                image:nil
-                identifier:nil
-                handler:[self createOpenScheme:key at:directory]]];
-        }
+    if ([UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:@"shareddocuments://"]]) {
+        [openItems addObject:[UIAction
+            actionWithTitle:@"Files"
+            image:nil
+            identifier:nil
+            handler:[self createOpenScheme:@"shareddocuments" at:directory]]];
+    }
+    if ([UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:@"filza://"]]) {
+        [openItems addObject:[UIAction
+            actionWithTitle:@"Filza"
+            image:nil
+            identifier:nil
+            handler:[self createOpenScheme:@"filza" at:directory]]];
+    }
+    if ([UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:@"santander://"]]) {
+        [openItems addObject:[UIAction
+            actionWithTitle:@"Santander"
+            image:nil
+            identifier:nil
+            handler:[self createOpenScheme:@"santander" at:directory]]];
     }
     UIMenu *open = [UIMenu
         menuWithTitle:@""
@@ -224,14 +245,14 @@ viewForFooterInSection:(NSInteger)section
         NSString *directory = [NSString stringWithFormat:@"%s/instances/%@", getenv("POJAV_HOME"), self.array[indexPath.row]];
         NSError *error;
         if([NSFileManager.defaultManager removeItemAtPath:directory error:&error]) {
-            if ([getPrefObject(@"general.game_directory") isEqualToString:self.array[indexPath.row]]) {
+            if ([getPreference(@"game_directory") isEqualToString:self.array[indexPath.row]]) {
                 [self changeSelectionTo:self.array[0]];
                 [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]].accessoryType = UITableViewCellAccessoryCheckmark;
             }
             [self.array removeObjectAtIndex:indexPath.row];
-            [self.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+            [self.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade]; 
         } else {
-            showDialog(localize(@"Error", nil), error.localizedDescription);
+            showDialog(self, localize(@"Error", nil), error.localizedDescription);
         }
     }];
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil];
@@ -288,7 +309,7 @@ viewForFooterInSection:(NSInteger)section
         if (!isFooterView) {
             sender.text = sender.placeholder;
         }
-        showDialog(localize(@"Error", nil), error.localizedDescription);
+        showDialog(self, localize(@"Error", nil), error.localizedDescription);
     }
 }
 

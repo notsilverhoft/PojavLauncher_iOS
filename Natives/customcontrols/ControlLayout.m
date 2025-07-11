@@ -15,7 +15,7 @@
     self.layoutDictionary = layoutDictionary;
 
     CGFloat currentScale = [self.layoutDictionary[@"scaledAt"] floatValue];
-    CGFloat savedScale = getPrefFloat(@"control.button_scale");
+    CGFloat savedScale = [getPreference(@"button_scale") floatValue];
     loadControlObject(self, self.layoutDictionary);
 
     self.layoutDictionary[@"scaledAt"] = @(savedScale);
@@ -27,8 +27,8 @@
     NSString *controlFilePath = [NSString stringWithFormat:@"%s/controlmap/%@", getenv("POJAV_HOME"), name];
 
     self.layoutDictionary = parseJSONFromFile(controlFilePath);
-    if (self.layoutDictionary[@"NSErrorObject"] != nil) {
-        showDialog(localize(@"Error", nil), [NSString stringWithFormat:@"Could not open %@: %@", controlFilePath, [self.layoutDictionary[@"NSErrorObject"] localizedDescription]]);
+    if (self.layoutDictionary[@"error"] != nil) {
+        showDialog(currentVC(), localize(@"Error", nil), [NSString stringWithFormat:@"Could not open %@: %@", controlFilePath, [self.layoutDictionary[@"error"] localizedDescription]]);
         return;
     }
     [self loadControlLayout:self.layoutDictionary];
@@ -70,21 +70,12 @@
     [super setFrame:frame];
 
     for (UIView *view in self.subviews) {
-        if (![view isKindOfClass:ControlButton.class]) {
+        if (![view isKindOfClass:ControlButton.class] ||
+          ([view isKindOfClass:ControlSubButton.class] &&
+          ![((ControlSubButton *)view).parentDrawer.drawerData[@"orientation"] isEqualToString:@"FREE"])) {
             continue;
         }
         [(ControlButton *)view update];
-    }
-
-    CGFloat savedScale = getPrefFloat(@"control.button_scale");
-    self.layoutDictionary[@"scaledAt"] = @(savedScale);
-}
-
-// https://nsantoine.dev/posts/CALayerCaptureHiding
-- (void)hideViewFromCapture:(BOOL)hide {
-    if ([self.layer respondsToSelector:@selector(disableUpdateMask)]) {
-        NSUInteger hideFlag = (1 << 1) | (1 << 4);
-        self.layer.disableUpdateMask = hide ? hideFlag : 0;
     }
 }
 

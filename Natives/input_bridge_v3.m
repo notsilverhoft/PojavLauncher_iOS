@@ -25,17 +25,15 @@
 #include "JavaLauncher.h"
 
 jint (*orig_ProcessImpl_forkAndExec)(JNIEnv *env, jobject process, jint mode, jbyteArray helperpath, jbyteArray prog, jbyteArray argBlock, jint argc, jbyteArray envBlock, jint envc, jbyteArray dir, jintArray std_fds, jboolean redirectErrorStream);
-jlong (*orig_ProcessHandleImpl_isAlive0)(JNIEnv *env, jclass clazz, jlong jpid);
 
 NSString* processPath(NSString* path) {
     if ([path hasPrefix:@"file:"]) {
-        path = [path substringFromIndex:5].stringByRemovingPercentEncoding;
+        path = [path substringFromIndex:5].stringByRemovingPercentEncoding.stringByResolvingSymlinksInPath;
     }
-    path = path.stringByResolvingSymlinksInPath;
 
     NSString *prefix = @"file";
     if ([UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:@"shareddocuments://"]] &&
-      ![path hasPrefix:@"/var/mobile/Documents"]) {
+      ![path hasPrefix:@"/usr"]) {
         // Prefer opening in Files if containerized
         prefix = @"shareddocuments";
     } else if ([UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:@"filza://"]]) {
@@ -47,30 +45,6 @@ NSString* processPath(NSString* path) {
     }
 
     return [NSString stringWithFormat:@"%@://%@", prefix, path];
-}
-
-void openURLGlobal(NSString *path) {
-    dispatch_group_t group = dispatch_group_create();
-    dispatch_group_enter(group);
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if ([path hasPrefix:@"http"]) {
-            openLink(UIWindow.mainWindow.rootViewController, [NSURL URLWithString:path]);
-            dispatch_group_leave(group);
-            return;
-        }
-        NSString *realPath = processPath(path);
-        [UIApplication.sharedApplication openURL:[NSURL URLWithString:realPath] options:@{} completionHandler:^(BOOL success) {
-            if (success) {
-                NSLog(@"Opened \"%@\"", realPath);
-            } else {
-                NSLog(@"Failed to open \"%@\"", realPath);
-            }
-            dispatch_group_leave(group);
-        }];
-    });
-
-    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
 }
 
 /**
@@ -87,130 +61,82 @@ hooked_ProcessImpl_forkAndExec(JNIEnv *env, jobject process, jint mode, jbyteArr
         return orig_ProcessImpl_forkAndExec(env, process, mode, helperpath, prog, argBlock, argc, envBlock, envc, dir, std_fds, redirectErrorStream);
     }
 
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_group_enter(group);
+
     char *path = (char *)((*env)->GetByteArrayElements(env, argBlock, NULL));
-    openURLGlobal(@(path));
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([@(path) hasPrefix:@"http"]) {
+            openLink(currentWindow().rootViewController, [NSURL URLWithString:@(path)]);
+            dispatch_group_leave(group);
+            return;
+        }
+        NSString *realPath = processPath(@(path));
+        [[UIApplication sharedApplication] openURL:[NSURL URLWithString:realPath] options:@{} completionHandler:^(BOOL success) {
+            if (success) {
+                NSLog(@"Opened \"%@\"", realPath);
+            } else {
+                NSLog(@"Failed to open \"%@\"", realPath);
+            }
+            dispatch_group_leave(group);
+        }];
+    });
+
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
 
     (*env)->ReleaseByteArrayElements(env, prog, (jbyte *)pProg, 0);
     (*env)->ReleaseByteArrayElements(env, argBlock, (jbyte *)path, 0);
     return 0;
 }
 
-/**
- * Hooked version of java.lang.ProcessHandleImpl.isAlive0()
- * which is used to ignore "Operation not permitted"
- */
-jlong hooked_ProcessHandleImpl_isAlive0(JNIEnv *env, jclass clazz, jlong jpid) {
-    jlong result = orig_ProcessHandleImpl_isAlive0(env, clazz, jpid);
-    if ((*env)->ExceptionOccurred(env)) {
-        (*env)->ExceptionClear(env);
-    }
-    return result;
-}
-
-// Part of awt_bridge
-void CTCClipboard_nQuerySystemClipboard(JNIEnv *env, jclass clazz) {
-    if(method_SystemClipboardDataReceived == NULL) {
-        class_CTCClipboard = (*env)->NewGlobalRef(env, clazz);
-        method_SystemClipboardDataReceived = (*env)->GetStaticMethodID(env, clazz, "systemClipboardDataReceived", "(Ljava/lang/String;Ljava/lang/String;)V");
-    }
-    // From Java_net_kdt_pojavlaunch_AWTInputBridge_nativeClipboardReceived
-    // Note: we cannot use main_queue here as it will cause deadlock
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        JNIEnv *env;
-        (*runtimeJavaVMPtr)->AttachCurrentThread(runtimeJavaVMPtr, &env, NULL);
-        const char* mimeChars = "text/plain";
-        (*env)->CallStaticVoidMethod(env, class_CTCClipboard, method_SystemClipboardDataReceived,
-            UIKit_accessClipboard(env, CLIPBOARD_PASTE, NULL),
-            (*env)->NewStringUTF(env, mimeChars));
-        (*runtimeJavaVMPtr)->DetachCurrentThread(runtimeJavaVMPtr);
-    });
-}
-
-void CTCClipboard_nPutClipboardData(JNIEnv* env, jclass clazz, jstring clipboardData, jstring clipboardDataMime) {
-    // TODO: handle non-text data(?)
-    UIKit_accessClipboard(env, CLIPBOARD_COPY, clipboardData);
-}
-
-void CTCDesktopPeer_openGlobal(JNIEnv *env, jclass clazz, jstring path) {
-    const char* stringChars = (*env)->GetStringUTFChars(env, path, NULL);
-    openURLGlobal(@(stringChars));
-    (*env)->ReleaseStringUTFChars(env, path, stringChars);
-}
-
-void registerOpenHandler(JNIEnv *env) {
+void hookExec() {
     jclass cls;
-
-    // Hook forkAndExec
     orig_ProcessImpl_forkAndExec = dlsym(RTLD_DEFAULT, "Java_java_lang_UNIXProcess_forkAndExec");
     if (!orig_ProcessImpl_forkAndExec) {
         orig_ProcessImpl_forkAndExec = dlsym(RTLD_DEFAULT, "Java_java_lang_ProcessImpl_forkAndExec");
-        cls = (*env)->FindClass(env, "java/lang/ProcessImpl");
+        cls = (*runtimeJNIEnvPtr)->FindClass(runtimeJNIEnvPtr, "java/lang/ProcessImpl");
     } else {
-        cls = (*env)->FindClass(env, "java/lang/UNIXProcess");
+        cls = (*runtimeJNIEnvPtr)->FindClass(runtimeJNIEnvPtr, "java/lang/UNIXProcess");
     }
-    JNINativeMethod forkAndExecMethod[] = {
+    JNINativeMethod methods[] = {
         {"forkAndExec", "(I[B[B[BI[BI[B[IZ)I", (void *)&hooked_ProcessImpl_forkAndExec}
     };
-    (*env)->RegisterNatives(env, cls, forkAndExecMethod, 1);
-
-    // (Java 17 only) Hook isAlive0
-    cls = (*env)->FindClass(env, "java/lang/ProcessHandleImpl");
-    if ((*env)->ExceptionOccurred(env)) {
-        // Java 8
-        (*env)->ExceptionClear(env);
-    } else {
-        orig_ProcessHandleImpl_isAlive0 = dlsym(RTLD_DEFAULT, "Java_java_lang_ProcessHandleImpl_isAlive0");
-        JNINativeMethod isAlive0Method[] = {
-            {"isAlive0", "(J)J", (void *)&hooked_ProcessHandleImpl_isAlive0}
-        };
-        (*env)->RegisterNatives(env, cls, isAlive0Method, 1);
-    }
-
-    // Register CTCClipboard natives
-    cls = (*env)->FindClass(env, "net/java/openjdk/cacio/ctc/CTCClipboard");
-    if ((*env)->ExceptionOccurred(env)) {
-        // Java 17
-        (*env)->ExceptionClear(env);
-        cls = (*env)->FindClass(env, "com/github/caciocavallosilano/cacio/ctc/CTCClipboard");
-    }
-    JNINativeMethod clipboardMethods[] = {
-        {"nQuerySystemClipboard", "()V", (void *)&CTCClipboard_nQuerySystemClipboard},
-        {"nPutClipboardData", "(Ljava/lang/String;Ljava/lang/String;)V", (void *)&CTCClipboard_nPutClipboardData}
-    };
-    (*env)->RegisterNatives(env, cls, clipboardMethods, 2);
-
-    // Register CTCDesktopPeer natives
-    cls = (*env)->FindClass(env, "net/java/openjdk/cacio/ctc/CTCDesktopPeer");
-    if ((*env)->ExceptionOccurred(env)) {
-        // Java 17, not available
-        //(*env)->ExceptionDescribe(env);
-        (*env)->ExceptionClear(env);
-        return;
-    }
-    JNINativeMethod peerOpenMethods[] = {
-        {"openFile", "(Ljava/lang/String;)V", (void *)&CTCDesktopPeer_openGlobal},
-        {"openUri", "(Ljava/lang/String;)V", (void *)&CTCDesktopPeer_openGlobal}
-    };
-    (*env)->RegisterNatives(env, cls, peerOpenMethods, 2);
+    (*runtimeJNIEnvPtr)->RegisterNatives(runtimeJNIEnvPtr, cls, methods, 1);
 }
 
 // JNI_OnLoad
 void JNI_OnLoadGLFW() {
     vmGlfwClass = (*runtimeJNIEnvPtr)->NewGlobalRef(runtimeJNIEnvPtr, (*runtimeJNIEnvPtr)->FindClass(runtimeJNIEnvPtr, "org/lwjgl/glfw/GLFW"));
+    method_glfwSetWindowAttrib = (*runtimeJNIEnvPtr)->GetStaticMethodID(runtimeJNIEnvPtr, vmGlfwClass, "glfwSetWindowAttrib", "(JII)V");
     method_internalWindowSizeChanged = (*runtimeJNIEnvPtr)->GetStaticMethodID(runtimeJNIEnvPtr, vmGlfwClass, "internalWindowSizeChanged", "(JII)V");
     jfieldID field_keyDownBuffer = (*runtimeJNIEnvPtr)->GetStaticFieldID(runtimeJNIEnvPtr, vmGlfwClass, "keyDownBuffer", "Ljava/nio/ByteBuffer;");
     jobject keyDownBufferJ = (*runtimeJNIEnvPtr)->GetStaticObjectField(runtimeJNIEnvPtr, vmGlfwClass, field_keyDownBuffer);
     keyDownBuffer = (*runtimeJNIEnvPtr)->GetDirectBufferAddress(runtimeJNIEnvPtr, keyDownBufferJ);
 }
+/*
+jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    runtimeJavaVMPtr = vm;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        (*runtimeJavaVMPtr)->AttachCurrentThread(runtimeJavaVMPtr, &runtimeJNIEnvPtr, NULL);
+        if (!getenv("POJAV_SKIP_JNI_GLFW")) {
+            JNI_OnLoadGLFW();
+        }
+        hookExec();
+    });
+
+    return JNI_VERSION_1_4;
+}
+*/
 
 jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     runtimeJavaVMPtr = vm;
 
-    JNIEnv *env;
-    (*runtimeJavaVMPtr)->GetEnv(runtimeJavaVMPtr, (void **)&env, JNI_VERSION_1_4);
-    registerOpenHandler(env);
-    if (!getenv("POJAV_SKIP_JNI_GLFW")) {
-        runtimeJNIEnvPtr = env;
+    (*runtimeJavaVMPtr)->GetEnv(runtimeJavaVMPtr, (void **)&runtimeJNIEnvPtr, JNI_VERSION_1_4);
+    hookExec();
+    if (getenv("POJAV_SKIP_JNI_GLFW")) {
+        runtimeJNIEnvPtr = nil;
+    } else {
         JNI_OnLoadGLFW();
     }
 
@@ -249,7 +175,6 @@ void handleFramebufferSizeJava(void* window, int w, int h) {
 }
 
 void pojavPumpEvents(void* window) {
-    CallbackBridge_nativeSetInputReady(YES);
     //__android_log_print(ANDROID_LOG_INFO, "input_bridge_v3", "pojavPumpevents %d", eventCounter);
     size_t counter = atomic_load_explicit(&eventCounter, memory_order_acquire);
     if((cLastX != cursorX || cLastY != cursorY) && GLFW_invoke_CursorPos) {
@@ -274,7 +199,7 @@ void pojavPumpEvents(void* window) {
                 if(GLFW_invoke_MouseButton) GLFW_invoke_MouseButton(window, event.i1, event.i2, event.i3);
                 break;
             case EVENT_TYPE_SCROLL:
-                if(GLFW_invoke_Scroll) GLFW_invoke_Scroll(window, event.f1, event.f2);
+                if(GLFW_invoke_Scroll) GLFW_invoke_Scroll(window, event.i1, event.i2);
                 break;
             case EVENT_TYPE_FRAMEBUFFER_SIZE:
                 handleFramebufferSizeJava(window, event.i1, event.i2);
@@ -313,26 +238,13 @@ Java_org_lwjgl_glfw_GLFW_glfwSetCursorPos(JNIEnv *env, jclass clazz, jlong windo
     cLastY = cursorY = ypos;
 }
 
-void sendData(short type, int i1, int i2, short i3, short i4) {
+void sendData(short type, short i1, short i2, short i3, short i4) {
     size_t counter = atomic_load_explicit(&eventCounter, memory_order_acquire);
     if (counter < 7999) {
         GLFWInputEvent *event = &events[counter++];
         event->type = type;
         event->i1 = i1;
         event->i2 = i2;
-        event->i3 = i3;
-        event->i4 = i4;
-    }
-    atomic_store_explicit(&eventCounter, counter, memory_order_release);
-}
-
-void sendDataFloat(short type, float i1, float i2, short i3, short i4) {
-    size_t counter = atomic_load_explicit(&eventCounter, memory_order_acquire);
-    if (counter < 7999) {
-        GLFWInputEvent *event = &events[counter++];
-        event->type = type;
-        event->f1 = i1;
-        event->f2 = i2;
         event->i3 = i3;
         event->i4 = i4;
     }
@@ -391,29 +303,37 @@ JNIEXPORT jstring JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeClipboard(JNI
     return UIKit_accessClipboard(env, action, copySrc);
 }
 
+JNIEXPORT jboolean JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeSetInputReady(JNIEnv* env, jclass clazz, jboolean inputReady) {
+    //NSDebugLog(@"Debug: Changing input state, isReady=%d, isUseStackQueueCall=%d\n", inputReady, isUseStackQueueCall);
+    isInputReady = inputReady;
+    if (isUseStackQueueCall) {
+        sendData(EVENT_TYPE_FRAMEBUFFER_SIZE, windowWidth, windowHeight, 0, 0);
+        sendData(EVENT_TYPE_WINDOW_SIZE, windowWidth, windowHeight, 0, 0);
+    }
+    return isUseStackQueueCall;
+}
+
 JNIEXPORT void JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeSetGrabbing(JNIEnv* env, jclass clazz, jboolean grabbing, jfloat xset, jfloat yset) {
     isGrabbing = grabbing;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        SurfaceViewController *vc = ((SurfaceViewController *)UIWindow.mainWindow.rootViewController);
-        [vc updateGrabState];
+        SurfaceViewController *vc = ((SurfaceViewController *)currentWindow().rootViewController);
+        UIView *surfaceView = vc.surfaceView;
+        if (isGrabbing == JNI_TRUE) {
+            CGFloat screenScale = [[UIScreen mainScreen] scale] * resolutionScale;
+            CallbackBridge_nativeSendCursorPos(ACTION_DOWN, lastVirtualMousePoint.x * screenScale, lastVirtualMousePoint.y * screenScale);
+            CGRect screenBounds = [[UIScreen mainScreen] bounds];
+            virtualMouseFrame.origin.x = screenBounds.size.width / 2;
+            virtualMouseFrame.origin.y = screenBounds.size.height / 2;
+            vc.mousePointerView.frame = virtualMouseFrame;
+        }
+        vc.scrollPanGesture.enabled = !isGrabbing;
+        vc.mousePointerView.hidden = isGrabbing || !virtualMouseEnabled;
     });
 }
 
 JNIEXPORT jboolean JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeIsGrabbing(JNIEnv* env, jclass clazz) {
     return isGrabbing;
-}
-
-void CallbackBridge_nativeSetInputReady(BOOL inputReady) {
-    isInputReady = inputReady;
-    if (inputReady) {
-        if (GLFW_invoke_FramebufferSize) {
-            GLFW_invoke_FramebufferSize((void*) showingWindow, windowWidth, windowHeight);
-        }
-        if (GLFW_invoke_WindowSize) {
-            GLFW_invoke_FramebufferSize((void*) showingWindow, windowWidth, windowHeight);
-        }
-    }
 }
 
 BOOL CallbackBridge_nativeSendChar(jchar codepoint /* jint codepoint */) {
@@ -523,13 +443,6 @@ void CallbackBridge_nativeSendKey(int key, int scancode, int action, int mods) {
             GLFW_invoke_Key((void*) showingWindow, key, scancode, action, mods);
         }
     }
-
-    // On macOS, Minecraft expects the Command key
-    if (key == GLFW_KEY_LEFT_CONTROL) {
-        CallbackBridge_nativeSendKey(GLFW_KEY_LEFT_SUPER, 0, action, mods);
-    } else if (key == GLFW_KEY_RIGHT_CONTROL) {
-        CallbackBridge_nativeSendKey(GLFW_KEY_RIGHT_SUPER, 0, action, mods);
-    }
 }
 
 void CallbackBridge_nativeSendMouseButton(int button, int action, int mods) {
@@ -576,7 +489,7 @@ void CallbackBridge_nativeSendScreenSize(int width, int height) {
 void CallbackBridge_nativeSendScroll(CGFloat xoffset, CGFloat yoffset) {
     if (GLFW_invoke_Scroll && isInputReady) {
         if (isUseStackQueueCall) {
-            sendDataFloat(EVENT_TYPE_SCROLL, xoffset, yoffset, 0, 0);
+            sendData(EVENT_TYPE_SCROLL, xoffset, yoffset, 0, 0);
         } else {
             GLFW_invoke_Scroll((void*) showingWindow, (double) xoffset, (double) yoffset);
         }
@@ -587,9 +500,16 @@ JNIEXPORT void JNICALL Java_org_lwjgl_glfw_GLFW_nglfwSetShowingWindow(JNIEnv* en
     showingWindow = (long) window;
 }
 
-void CallbackBridge_pauseGameIfNeed() {
-    if (isGrabbing) {
-        CallbackBridge_nativeSendKey(GLFW_KEY_ESCAPE, 0, 1, 0);
-        CallbackBridge_nativeSendKey(GLFW_KEY_ESCAPE, 0, 0, 0);
+void CallbackBridge_setWindowAttrib(int attrib, int value) {
+    if (!showingWindow || !isUseStackQueueCall) {
+        // If the window is not shown, there is nothing to do yet.
+        // For Minecraft < 1.13, calling to JNI functions here crashes the JVM for some reason, therefore it is skipped for now.
+        return;
     }
+
+    (*runtimeJNIEnvPtr)->CallStaticVoidMethod(
+        runtimeJNIEnvPtr,
+        vmGlfwClass, method_glfwSetWindowAttrib,
+        (jlong) showingWindow, attrib, value
+    );
 }

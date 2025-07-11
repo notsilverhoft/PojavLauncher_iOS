@@ -1,7 +1,6 @@
 #import "CustomControlsViewController.h"
 #import "LauncherPreferences.h"
 #import "LauncherPreferencesViewController.h"
-#import "PLProfiles.h"
 #import "SurfaceViewController.h"
 #import "utils.h"
 
@@ -119,6 +118,7 @@ static CGPoint lastCenterPoint;
                 exit(0);
             } else {
                 dispatch_group_leave(fatalExitGroup);
+                fatalExitGroup = nil;
             }
         }];
     }];
@@ -132,18 +132,6 @@ static CGPoint lastCenterPoint;
     [self.ctrlView removeAllButtons];
     CustomControlsViewController *vc = [[CustomControlsViewController alloc] init];
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
-    vc.setDefaultCtrl = ^(NSString *name){
-        if (PLProfiles.current.selectedProfile[@"defaultTouchCtrl"]) {
-            // Save default to current profile
-            PLProfiles.current.selectedProfile[@"defaultTouchCtrl"] = name;
-        } else {
-            // Save default to preferences
-            setPrefObject(@"control.default_ctrl", name);
-        }
-    };
-    vc.getDefaultCtrl = ^{
-        return [PLProfiles resolveKeyForCurrentProfile:@"defaultTouchCtrl"];
-    };
     [self presentViewController:vc animated:NO completion:nil];
 }
 
@@ -153,6 +141,11 @@ static CGPoint lastCenterPoint;
 }
 
 - (void)actionOpenNavigationMenu {
+    if (@available(iOS 14, *)) {
+        // Use UIMenu
+    } else {
+        [self animateMenuScale:0.7 duration:0.3];
+    }
 }
 
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {
@@ -164,7 +157,7 @@ static CGPoint lastCenterPoint;
 
 - (BOOL)prefersHomeIndicatorAutoHidden {
     return self.menuView.hidden &&
-        getPrefBool(@"debug.debug_hide_home_indicator");
+        [getPreference(@"debug_hide_home_indicator") boolValue];
 }
 
 - (BOOL)prefersStatusBarHidden {
@@ -181,7 +174,11 @@ static CGPoint lastCenterPoint;
     if (cell == nil) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
     }
-    cell.backgroundColor = UIColor.systemFillColor;
+    if (@available(iOS 13.0, *)) {
+        cell.backgroundColor = UIColor.systemFillColor;
+    } else {
+        cell.backgroundColor = UIColor.groupTableViewBackgroundColor;
+    }
 
     cell.textLabel.text = localize(self.menuArray[indexPath.row], nil);
 
@@ -199,7 +196,7 @@ static CGPoint lastCenterPoint;
             [self actionForceClose];
             break;
         case 1:
-            [self.logOutputView actionToggleLogOutput];
+            [self performSelector:@selector(actionToggleLogOutput)];
             break;
         case 2:
             [self actionOpenCustomControls];

@@ -1,6 +1,6 @@
 #import "Foundation/Foundation.h"
 
-typedef void(^Callback)(id status, BOOL success);
+typedef void(^Callback)(NSString* status, BOOL success);
 
 @interface BaseAuthenticator : NSObject
 
@@ -9,7 +9,6 @@ typedef void(^Callback)(id status, BOOL success);
 @property NSMutableDictionary *authData;
 
 + (id)loadSavedName:(NSString *)name;
-+ (NSDictionary *)tokenDataOfProfile:(NSString *)profile;
 
 - (id)initWithInput:(NSString *)string;
 - (void)loginWithCallback:(Callback)callback;
@@ -22,7 +21,4 @@ typedef void(^Callback)(id status, BOOL success);
 @end
 
 @interface MicrosoftAuthenticator : BaseAuthenticator
-
-+ (void)clearTokenDataOfProfile:(NSString *)profile;
-
 @end

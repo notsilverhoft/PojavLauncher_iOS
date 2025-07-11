@@ -4,14 +4,22 @@
 #import "LauncherNavigationController.h"
 #import "LauncherPreferences.h"
 #import "LauncherSplitViewController.h"
-#import "PLLogOutputView.h"
 #import "SurfaceViewController.h"
 
-#include <objc/runtime.h>
 #include "ios_uikit_bridge.h"
 #include "utils.h"
 
-void internal_showDialog(NSString* title, NSString* message) {
+#define CLIPBOARD_COPY 2000
+#define CLIPBOARD_PASTE 2001
+// Maybe CLIPBOARD_OPENURL then?
+
+jclass class_CTCScreen;
+jmethodID method_GetRGB;
+
+jclass class_CTCAndroidInput;
+jmethodID method_ReceiveInput;
+
+void internal_showDialog(UIViewController *viewController, NSString* title, NSString* message) {
     NSLog(@"[UI] Dialog shown: %@: %@", title, message);
 
     UIAlertController* alert = [UIAlertController alertControllerWithTitle:title
@@ -21,19 +29,12 @@ void internal_showDialog(NSString* title, NSString* message) {
     UIAlertAction* okAction = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDefault handler:nil];
     [alert addAction:okAction];
 
-    UIWindow *alertWindow = [[UIWindow alloc] initWithWindowScene:UIWindow.mainWindow.windowScene];
-    alertWindow.frame = UIScreen.mainScreen.bounds;
-    alertWindow.rootViewController = [UIViewController new];
-    alertWindow.windowLevel = 1000;
-    [alertWindow makeKeyAndVisible];
-    objc_setAssociatedObject(alert, @selector(alertWindow), alertWindow, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    [alertWindow.rootViewController presentViewController:alert animated:YES completion:nil];
+    [currentVC() presentViewController:alert animated:YES completion:nil];
 }
 
-void showDialog(NSString* title, NSString* message) {
+void showDialog(UIViewController *viewController, NSString* title, NSString* message) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        internal_showDialog(title, message);
+        internal_showDialog(viewController ? viewController : currentVC(), title, message);
     });
 }
 
@@ -47,7 +48,7 @@ JNIEXPORT void JNICALL Java_net_kdt_pojavlaunch_uikit_UIKit_showError(JNIEnv* en
 
     if (SurfaceViewController.isRunning) {
         NSLog(@"%@\n%@", title_o, message_o);
-        [PLLogOutputView handleExitCode:1];
+        [SurfaceViewController handleExitCode:1];
         return;
     }
 
@@ -84,7 +85,7 @@ dispatch_async(dispatch_get_main_queue(), ^{
 });
 }
 
-jstring UIKit_accessClipboard(JNIEnv* env, jint action, jbyteArray copySrc) {
+jstring UIKit_accessClipboard(JNIEnv* env, jint action, jstring copySrc) {
     if (action == CLIPBOARD_PASTE) {
         // paste request
         if (UIPasteboard.generalPasteboard.hasStrings) {
@@ -94,11 +95,9 @@ jstring UIKit_accessClipboard(JNIEnv* env, jint action, jbyteArray copySrc) {
         }
     } else if (action == CLIPBOARD_COPY) {
         // copy request
-        const char* copySrcC = (*env)->GetByteArrayElements(env, copySrc, 0);
-        if (copySrcC) {
-            UIPasteboard.generalPasteboard.string = @(copySrcC);
-            (*env)->ReleaseByteArrayElements(env, copySrc, copySrcC, 0);
-        }
+        const char* copySrcC = (*env)->GetStringUTFChars(env, copySrc, 0);
+        UIPasteboard.generalPasteboard.string = @(copySrcC);
+        (*env)->ReleaseStringUTFChars(env, copySrc, copySrcC);
         return NULL;
     } else {
         // unknown request
@@ -107,18 +106,19 @@ jstring UIKit_accessClipboard(JNIEnv* env, jint action, jbyteArray copySrc) {
     }
 }
 
-void UIKit_launchMinecraftSurfaceVC(UIWindow* window, NSDictionary* metadata) {
+void UIKit_launchMinecraftSurfaceVC() {
     // Leave this pref, might be useful later for launching with Quick Actions/Shortcuts/URL Scheme
     //setPreference(@"internal_launch_on_boot", getPreference(@"restart_before_launch"));
-    setPrefObject(@"internal.selected_account", BaseAuthenticator.current.authData[@"username"]);
+    setPreference(@"selected_account", BaseAuthenticator.current.authData[@"username"]);
+    setPreference(@"internal_useStackQueue", @(isUseStackQueueCall ? YES : NO));
     dispatch_async(dispatch_get_main_queue(), ^{
-        tmpRootVC = window.rootViewController;
+        UIWindow *window = currentWindow();
         [UIView animateWithDuration:0.2 animations:^{
             window.alpha = 0;
         } completion:^(BOOL b){
             [window resignKeyWindow];
             window.alpha = 1;
-            window.rootViewController = [[SurfaceViewController alloc] initWithMetadata:metadata];
+            window.rootViewController = [[SurfaceViewController alloc] init];
             [window makeKeyAndVisible];
         }];
     });
@@ -128,25 +128,16 @@ void UIKit_returnToSplitView() {
     // Researching memory-safe ways to return from SurfaceViewController to the split view
     // so that the app doesn't close when quitting the game (similar behaviour to Android)
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *window = UIWindow.mainWindow;
-
-        // Return from JavaGUIViewController
-        if ([window.rootViewController isKindOfClass:LauncherSplitViewController.class]) {
-            [currentVC() dismissViewControllerAnimated:YES completion:nil];
-            return;
-        }
-
-        // Return from SurfaceViewController
+        UIWindow *window = currentWindow();
         [UIView animateWithDuration:0.2 animations:^{
             window.alpha = 0;
         } completion:^(BOOL b){
             [window resignKeyWindow];
             window.alpha = 1;
-            if (tmpRootVC) {
-                window.rootViewController = tmpRootVC;
-                tmpRootVC = nil;
-            } else {
+            if (@available(iOS 14.0, tvOS 14.0, *)) {
                 window.rootViewController = [[LauncherSplitViewController alloc] initWithStyle:UISplitViewControllerStyleDoubleColumn];
+            } else {
+                window.rootViewController = [[LauncherSplitViewController alloc] init];
             }
             [window makeKeyAndVisible];
         }];
@@ -154,12 +145,13 @@ void UIKit_returnToSplitView() {
 }
 
 void launchInitialViewController(UIWindow *window) {
-    window.rootViewController = [[LauncherSplitViewController alloc] initWithStyle:UISplitViewControllerStyleDoubleColumn];
-#if 0
-    if (getPrefBool(@"internal.internal_launch_on_boot")) {
+    if ([getPreference(@"internal_launch_on_boot") boolValue]) {
         window.rootViewController = [[SurfaceViewController alloc] init];
     } else {
-        window.rootViewController = [[LauncherSplitViewController alloc] initWithStyle:UISplitViewControllerStyleDoubleColumn];
+        if (@available(iOS 14.0, tvOS 14.0, *)) {
+            window.rootViewController = [[LauncherSplitViewController alloc] initWithStyle:UISplitViewControllerStyleDoubleColumn];
+        } else {
+            window.rootViewController = [[LauncherSplitViewController alloc] init];
+        }
     }
-#endif
 }

@@ -11,13 +11,12 @@
 @interface ControlButton : UIButton {
 }
 
-@property BOOL canBeHidden, displayInGame, displayInMenu, isToggleOn;
+@property BOOL canBeHidden, isToggleOn;
 @property(nonatomic) NSMutableDictionary* properties;
 @property(nonatomic) UIColor* savedBackgroundColor;
 
 + (id)buttonWithProperties:(NSMutableDictionary *)propArray;
 
-- (CGFloat)calculateDynamicPos:(NSString *)string;
 - (BOOL)canSnap:(ControlButton *)button;
 - (NSString *)generateDynamicX:(CGFloat)x;
 - (NSString *)generateDynamicY:(CGFloat)y;

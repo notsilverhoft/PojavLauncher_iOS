@@ -18,6 +18,8 @@ jobs:
         include:
           - platform: 2
             platform_name: ios
+          - platform: 3
+            platform_name: tvos
           - platform: 7
             platform_name: iossimulator
           - platform: 8
@@ -37,7 +39,7 @@ jobs:
           ls -lah ./
           
       - name: Checkout repository
-        uses: actions/checkout@main
+        uses: actions/checkout@v3
 
       - name: Checkout repository submodules
         run: git submodule update --init --recursive
@@ -48,7 +50,7 @@ jobs:
         shell: bash
 
       - name: Cache gl4es
-        uses: actions/cache@main
+        uses: actions/cache@v3
         if: false # use gl4es 1.1.5
         id: gl4es-cache
         with:
@@ -57,7 +59,7 @@ jobs:
 
       - name: Get gl4es
         if: false && steps.gl4es-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@main
+        uses: actions/checkout@v3
         with:
           repository: 'PojavLauncherTeam/gl4es-114-extra'
           path: 'gl4es'
@@ -92,9 +94,8 @@ jobs:
           workflow: build.yml
           path: depends
           workflow_conclusion: success
-          allow_forks: false
           repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre8
+          branch: jre8-ios-jitjailed
           name: jre8-ios-aarch64
 
       - name: Get JRE17
@@ -103,23 +104,10 @@ jobs:
           github_token: ${{secrets.GITHUB_TOKEN}}
           workflow: build.yml
           path: depends
-          workflow_conclusion: completed
-          allow_forks: false
+          workflow_conclusion: success
           repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre17-21
+          branch: buildjre17
           name: jre17-ios-aarch64
-
-      - name: Get JRE21
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: completed
-          allow_forks: false
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre17-21
-          name: jre21-ios-aarch64
 
       - name: Build for ${{ matrix.platform_name }}
         env:
@@ -127,45 +115,22 @@ jobs:
         run: |
           export PATH=/opt/procursus/bin:/opt/homebrew/bin:$PATH
           export RUNNER=1 SLIMMED=1
-          if [ "${{ matrix.platform_name }}" == "ios" ]; then
-            # Build ipa and tipa for iOS
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1
-          elif [ "${{ matrix.platform_name }}" == "tvos" ]; then
-            # Build tipa only for tvOS
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1
-          else
-            # Build ipa only for everything else
-            gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
-          fi
-
+          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
+          
       - name: Upload regular ipa
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v2
         with:
           name: net.kdt.pojavlauncher-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}.ipa
 
-      - name: Upload regular tipa
-        uses: actions/upload-artifact@main
-        with:
-          name: net.kdt.pojavlauncher-${{ matrix.platform_name }}-trollstore.tipa
-          path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}-trollstore.tipa
-
       - name: Upload slimmed ipa
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v2
         with:
           name: net.kdt.pojavlauncher.slimmed-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher.slimmed-*-${{ matrix.platform_name }}.ipa
 
-      - name: Upload slimmed tipa
-        uses: actions/upload-artifact@main
-        with:
-          name: net.kdt.pojavlauncher.slimmed-${{ matrix.platform_name }}-trollstore.tipa
-          path: artifacts/net.kdt.pojavlauncher.slimmed-*-${{ matrix.platform_name }}-trollstore.tipa
-
       - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@main
-        if: matrix.platform_name == 'ios'
+        uses: actions/upload-artifact@v2
         with:
           name: PojavLauncher.dSYM
           path: artifacts/PojavLauncher.dSYM

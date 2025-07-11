@@ -10,14 +10,8 @@
 
 typedef struct {
     short type;
-    union {
-        int i1;
-        float f1;
-    };
-    union {
-        int i2;
-        float f2;
-    };
+    short i1;
+    short i2;
     short i3;
     short i4;
 } GLFWInputEvent;
@@ -33,18 +27,17 @@ typedef void GLFW_invoke_Scroll_func(void* window, double xoffset, double yoffse
 typedef void GLFW_invoke_WindowPos_func(void* window, int x, int y);
 typedef void GLFW_invoke_WindowSize_func(void* window, int width, int height);
 
-jclass class_CTCClipboard;
-jmethodID method_SystemClipboardDataReceived;
-
 //struct pojav_environ_s {
+    //struct ANativeWindow* pojavWindow;
     //render_window_t* mainWindowBundle;
+    int config_renderer;
     //BOOL force_vsync;
     atomic_size_t eventCounter;
     GLFWInputEvent events[8000];
     double cursorX, cursorY, cLastX, cLastY;
     //jmethodID method_accessAndroidClipboard;
     //jmethodID method_onGrabStateChanged;
-    //jmethodID method_glfwSetWindowAttrib;
+    jmethodID method_glfwSetWindowAttrib;
     jmethodID method_internalWindowSizeChanged;
     jclass bridgeClazz;
     jclass vmGlfwClass;
@@ -76,6 +69,7 @@ jmethodID method_SystemClipboardDataReceived;
 //};
 
 float resolutionScale;
-BOOL virtualMouseEnabled, isControlModifiable;
+BOOL virtualMouseEnabled;
+BOOL isControlModifiable;
 
 #endif //POJAVLAUNCHER_ENVIRON_H

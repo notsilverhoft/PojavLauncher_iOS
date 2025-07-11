@@ -16,7 +16,7 @@
     noteLabel.text = localize(@"game.note.airplay", nil);
     [self.touchView addSubview:noteLabel]; 
 
-    UIWindow *secondWindow = UIWindow.externalWindow;
+    UIWindow *secondWindow = currentWindowInScene(1);
     secondWindow.rootViewController = [[UIViewController alloc] init];
     [secondWindow.rootViewController.view addSubview:self.surfaceView]; 
     [secondWindow.rootViewController.view addSubview:self.mousePointerView];
@@ -29,7 +29,7 @@
     [self.surfaceView removeFromSuperview];
     [self.mousePointerView removeFromSuperview];
 
-    UIWindow *secondWindow = UIWindow.externalWindow;
+    UIWindow *secondWindow = currentWindowInScene(1);
     secondWindow.hidden = YES;
 
     [self.touchView.subviews[0] removeFromSuperview];

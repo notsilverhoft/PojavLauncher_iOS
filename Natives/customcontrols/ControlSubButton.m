@@ -17,11 +17,6 @@
 
 - (void)setParentDrawer:(ControlDrawer *)drawer {
     _parentDrawer = drawer;
-
-    // Copy visibility properties
-    self.displayInGame = drawer.displayInGame;
-    self.displayInMenu = drawer.displayInMenu;
-
     [self preProcessProperties];
     //NSLog(@"DEBUG: SubButton properties %@", self.properties);
 }

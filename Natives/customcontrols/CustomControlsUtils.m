@@ -1,5 +1,4 @@
 #import "ControlDrawer.h"
-#import "ControlJoystick.h"
 #import "ControlSubButton.h"
 #import "CustomControlsUtils.h"
 #import "../LauncherPreferences.h"
@@ -21,8 +20,6 @@ NSMutableDictionary* createButton(NSString* name, int* keycodes, NSString* dynam
     dict[@"opacity"] = @(1);
     dict[@"cornerRadius"] = @(0);
     dict[@"bgColor"] = @(0x4d000000);
-    dict[@"displayInGame"] = @YES;
-    dict[@"displayInMenu"] = @YES;
     return dict;
 }
 
@@ -59,28 +56,6 @@ int convertUIColor2RGB(UIColor* color) {
     return (0xFF << 24) | (r << 16) | (g << 8) | (b << 0);
 }
 
-static int computeStrokeWidth(float widthInPercent, float width, float height) {
-    CGFloat maxSize = MAX(width, height);
-    return (int) ((maxSize / 2) * (widthInPercent / 100));
-}
-
-void convertV3_4Layout(NSMutableDictionary* dict) {
-    // Convert the layout stroke width to the V5 form
-    for (NSMutableDictionary *button in (NSMutableArray *)dict[@"mControlDataList"]) {
-        button[@"strokeWidth"] = @(computeStrokeWidth([button[@"strokeWidth"] intValue], [button[@"width"] intValue], [button[@"height"] intValue]));
-    }
-
-    // Add default values
-    for (NSString *key in @[@"mControlDataList", @"mDrawerDataList"]) {
-        for (NSMutableDictionary *button in (NSMutableArray *)dict[key]) {
-            button[@"displayInGame"] = @YES;
-            button[@"displayInMenu"] = @YES;
-        }
-    }
-
-    dict[@"version"] = @(7);
-}
-
 void convertV2Layout(NSMutableDictionary* dict) {
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
     CGFloat screenScale = [[UIScreen mainScreen] scale];
@@ -107,8 +82,7 @@ void convertV2Layout(NSMutableDictionary* dict) {
         }
     }
 
-    dict[@"version"] = @(5);
-    convertV3_4Layout(dict);
+    dict[@"version"] = @(4);
 }
 
 void convertV1Layout(NSMutableDictionary* dict) {
@@ -180,14 +154,9 @@ BOOL convertLayoutIfNecessary(NSMutableDictionary* dict) {
             break;
         case 3:
         case 4:
-        case 5:
-            convertV3_4Layout(dict);
-            break;
-        case 6:
-        case 7:
             break;
         default:
-            showDialog(localize(@"custom_controls.control_menu.save.error.json", nil), [NSString stringWithFormat:localize(@"custom_controls.error.incompatible", nil), version]);
+            showDialog(currentVC(), localize(@"custom_controls.control_menu.save.error.json", nil), [NSString stringWithFormat:localize(@"custom_controls.error.imcompatible", nil), version]);
             return NO;
     }
     return YES;
@@ -199,13 +168,12 @@ void generateAndSaveDefaultControl() {
         return;
     }
 
-    // Generate a v2.7 control
+    // Generate a v2.4 control
     NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
-    dict[@"version"] = @(5);
+    dict[@"version"] = @(4);
     dict[@"scaledAt"] = @(100);
-    dict[@"mControlDataList"] = [NSMutableArray new];
-    dict[@"mDrawerDataList"] = [NSMutableArray new];
-    dict[@"mJoystickDataList"] = [NSMutableArray new];
+    dict[@"mControlDataList"] = [[NSMutableArray alloc] init];
+    dict[@"mDrawerDataList"] = [[NSMutableArray alloc] init];
     [dict[@"mControlDataList"] addObject:createButton(@"Keyboard",
         (int[]){SPECIALBTN_KEYBOARD,0,0,0},
         @"${margin} * 3 + ${width} * 2",
@@ -403,7 +371,7 @@ void loadControlObject(UIView* targetView, NSMutableDictionary* controlDictionar
 
     if (convertLayoutIfNecessary(controlDictionary)) {
         NSMutableArray *controlDataList = controlDictionary[@"mControlDataList"];
-        //setPrefObject(@"internal.internal_current_button_scale", controlDictionary[@"scaledAt"]);
+        setPreference(@"internal_current_button_scale", controlDictionary[@"scaledAt"]);
         for (NSMutableDictionary *buttonDict in controlDataList) {
             //APPLY_SCALE(buttonDict[@"strokeWidth"]);
             @try {
@@ -433,27 +401,13 @@ void loadControlObject(UIView* targetView, NSMutableDictionary* controlDictionar
                 [drawer addButton:subView];
                 [targetView addSubview:subView];
             }
-            [drawer update];
+            [drawer syncButtons];
         }
 
-        NSMutableArray *joystickDataList = controlDictionary[@"mJoystickDataList"];
-        if (!joystickDataList) {
-            controlDictionary[@"mJoystickDataList"] = [NSMutableArray new];
-        }
-        for (NSMutableDictionary *joystickDict in joystickDataList) {
-            @try {
-                ControlJoystick *button = [ControlJoystick buttonWithProperties:joystickDict];
-                [targetView addSubview:button];
-                [button update];
-            } @catch (NSException *exception) {
-                [errorString appendFormat:@"%@: %@\n", @"ControlJoystick", exception.reason];
-            }
-        }
-
-        controlDictionary[@"scaledAt"] = getPrefObject(@"control.button_scale");
+        controlDictionary[@"scaledAt"] = @([getPreference(@"button_scale") floatValue]);
 
         if (errorString.length > 0) {
-            showDialog(@"Error processing dynamic position", errorString);
+            showDialog(currentVC(), @"Error processing dynamic position", errorString);
         }
     }
 }
