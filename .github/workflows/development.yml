@@ -86,51 +86,23 @@ jobs:
           git commit -am "CI: Update gl4es"
           git push
 
-      - name: Get JRE8
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: success
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: jre8-ios-jitjailed
-          name: jre8-ios-aarch64
+      - name: Download JRE8 release
+        run: |
+          mkdir -p depends
+          curl -L -o depends/jre8-ios-aarch64.zip \
+            https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre8-40df388/jre8-ios-aarch64.zip
+          unzip depends/jre8-ios-aarch64.zip -d depends/
 
-      - name: Get JRE17
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: success
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre17
-          name: jre17-ios-aarch64
+      - name: Download JRE17 release
+        run: |
+          mkdir -p depends
+          curl -L -o depends/jre17-ios-aarch64.zip \
+            https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-fd4ad96/jre17-ios-aarch64.zip
+          unzip depends/jre17-ios-aarch64.zip -d depends/
 
       - name: Install gmake (GNU make)
         run: brew install gmake
 
       - name: Build for ${{ matrix.platform_name }}
         run: |
-          export PATH=/usr/local/bin:$PATH
-          export RUNNER=1 SLIMMED=1
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
-
-      - name: Upload regular ipa
-        uses: actions/upload-artifact@v4
-        with:
-          name: net.kdt.pojavlauncher-${{ matrix.platform_name }}.ipa
-          path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}.ipa
-
-      - name: Upload slimmed ipa
-        uses: actions/upload-artifact@v4
-        with:
-          name: net.kdt.pojavlauncher.slimmed-${{ matrix.platform_name }}.ipa
-          path: artifacts/net.kdt.pojavlauncher.slimmed-*-${{ matrix.platform_name }}.ipa
-
-      - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@v4
-        with:
-          name: PojavLauncher.dSYM
-          path: artifacts/PojavLauncher.dSYM
+          export PATH=/usr/local/bin:$
