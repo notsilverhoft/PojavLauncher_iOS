@@ -51,7 +51,7 @@ jobs:
 
       - name: Cache gl4es
         uses: actions/cache@v3
-        if: false # still disabled; enable if needed
+        if: false
         id: gl4es-cache
         with:
           path: gl4es/libs
@@ -118,19 +118,19 @@ jobs:
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
 
       - name: Upload regular ipa
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: net.kdt.pojavlauncher-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload slimmed ipa
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: net.kdt.pojavlauncher.slimmed-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher.slimmed-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: PojavLauncher.dSYM
           path: artifacts/PojavLauncher.dSYM
