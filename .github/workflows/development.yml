@@ -24,20 +24,19 @@ jobs:
             platform_name: iossimulator
           - platform: 8
             platform_name: tvossimulator
-    
-    runs-on: MacStadium
+
+    runs-on: macos-latest
+
     steps:
-      - name: Remove work folders
-        env:
-          password: ${{ secrets.ELLIE_MINI_SECRET }}
+      - name: Remove work folders (no sudo, no secrets)
         run: |
           echo "before"
           ls -lah ./
-          echo $password | sudo -S rm -rf ./* || true
-          echo $password | sudo -S rm -rf ./.??* || true
+          rm -rf ./* || true
+          rm -rf ./.??* || true
           echo "after"
           ls -lah ./
-          
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -46,12 +45,13 @@ jobs:
 
       - name: Get gl4es latest commit hash
         id: gl4es-sha
-        run: echo "::set-output name=sha::$(echo $(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | grep -io '^\S*'))"
+        run: |
+          echo "::set-output name=sha::$(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | grep -io '^\S*')"
         shell: bash
 
       - name: Cache gl4es
         uses: actions/cache@v3
-        if: false # use gl4es 1.1.5
+        if: false # still disabled; enable if needed
         id: gl4es-cache
         with:
           path: gl4es/libs
@@ -71,26 +71,25 @@ jobs:
           cd gl4es
           git config --global user.email "github-actions@users.noreply.github.com"
           git config --global user.name "github-actions"
-          export PATH=/opt/procursus/bin:$PATH
           wget https://github.com/leetal/ios-cmake/raw/master/ios.toolchain.cmake
           cmake -B build -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake -DDEFAULT_ES=2 \
             -DNOX11=ON -DNOEGL=OFF -DSTATICLIB=OFF -DPLATFORM=OS64 \
             -DCMAKE_C_FLAGS=-Wno-error=implicit-function-declaration
           cmake --build build --config RelWithDebInfo --target GL
           cp -R lib/libGL.dylib ../Natives/resources/Frameworks/libgl4es_114.dylib
-          
+
       - name: Push gl4es
-        if: false && github.event != 'pull_request' && github.ref_name == 'main' && steps.gl4es-cache.outputs.cache-hit != 'true'
+        if: false && github.event_name != 'pull_request' && github.ref_name == 'main' && steps.gl4es-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
           git add Natives/resources/Frameworks/libgl4es_114.dylib
           git commit -am "CI: Update gl4es"
           git push
-          
+
       - name: Get JRE8
         uses: dawidd6/action-download-artifact@v2
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: build.yml
           path: depends
           workflow_conclusion: success
@@ -101,7 +100,7 @@ jobs:
       - name: Get JRE17
         uses: dawidd6/action-download-artifact@v2
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: build.yml
           path: depends
           workflow_conclusion: success
@@ -109,28 +108,29 @@ jobs:
           branch: buildjre17
           name: jre17-ios-aarch64
 
+      - name: Install gmake (GNU make)
+        run: brew install gmake
+
       - name: Build for ${{ matrix.platform_name }}
-        env:
-          password: ${{ secrets.ELLIE_MINI_SECRET }}
         run: |
-          export PATH=/opt/procursus/bin:/opt/homebrew/bin:$PATH
+          export PATH=/usr/local/bin:$PATH
           export RUNNER=1 SLIMMED=1
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
-          
+
       - name: Upload regular ipa
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: net.kdt.pojavlauncher-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload slimmed ipa
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: net.kdt.pojavlauncher.slimmed-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher.slimmed-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: PojavLauncher.dSYM
           path: artifacts/PojavLauncher.dSYM
