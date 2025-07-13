@@ -46,52 +46,19 @@ jobs:
       - name: Get gl4es latest commit hash
         id: gl4es-sha
         run: |
-          echo "::set-output name=sha::$(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | grep -io '^\S*')"
-        shell: bash
+          echo "sha=$(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Cache gl4es
-        uses: actions/cache@v3
-        if: false
-        id: gl4es-cache
-        with:
-          path: gl4es/libs
-          key: gl4es-holy-ios-shared-2-${{ steps.gl4es-sha.outputs.sha }}
-
-      - name: Get gl4es
-        if: false && steps.gl4es-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v3
-        with:
-          repository: 'PojavLauncherTeam/gl4es-114-extra'
-          path: 'gl4es'
-
-      - name: Build gl4es
-        if: false && steps.gl4es-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        run: |
-          cd gl4es
-          git config --global user.email "github-actions@users.noreply.github.com"
-          git config --global user.name "github-actions"
-          wget https://github.com/leetal/ios-cmake/raw/master/ios.toolchain.cmake
-          cmake -B build -DCMAKE_TOOLCHAIN_FILE=ios.toolchain.cmake -DDEFAULT_ES=2 \
-            -DNOX11=ON -DNOEGL=OFF -DSTATICLIB=OFF -DPLATFORM=OS64 \
-            -DCMAKE_C_FLAGS=-Wno-error=implicit-function-declaration
-          cmake --build build --config RelWithDebInfo --target GL
-          cp -R lib/libGL.dylib ../Natives/resources/Frameworks/libgl4es_114.dylib
-
-      - name: Download and set up JDK 8
+      - name: Download and extract JDK 8
         run: |
           mkdir -p depends
-          curl -L -o depends/jdk8.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u362-b09/OpenJDK8U-jdk_x64_mac_hotspot_8u362b09.tar.gz
-          tar -xzf depends/jdk8.tar.gz -C depends/
-          JDK_DIR=$(find depends -maxdepth 1 -type d -name "jdk8u*" | head -n 1)
-          mv "$JDK_DIR" depends/java-8-openjdk
-          echo "BOOTJDK=$(pwd)/depends/java-8-openjdk/bin" >> $GITHUB_ENV
-          echo "$(pwd)/depends/java-8-openjdk/bin" >> $GITHUB_PATH
-
-      - name: Check JDK 8 version
-        run: |
-          echo "BOOTJDK: $BOOTJDK"
-          $BOOTJDK/javac -version
+          cd depends
+          curl -L -o jdk8.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u412-b08/OpenJDK8U-jdk_x64_mac_hotspot_8u412b08.tar.gz
+          tar -xzf jdk8.tar.gz
+          # Flatten directory and rename to match Makefile expectations
+          INNER_DIR=$(tar -tzf jdk8.tar.gz | head -1 | cut -f1 -d"/")
+          mv "$INNER_DIR" java-8-openjdk
+          echo "JAVA_HOME=$(pwd)/java-8-openjdk" >> $GITHUB_ENV
+          echo "$(pwd)/java-8-openjdk/bin" >> $GITHUB_PATH
 
       - name: Download JRE17
         run: |
@@ -99,14 +66,16 @@ jobs:
           curl -L -o depends/jre17.tar.xz https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ca01427/jre17-arm64-20220817-release.tar.xz
           tar -xJf depends/jre17.tar.xz -C depends/
 
-      - name: Install make (GNU Make)
-        run: brew install make
+      - name: Install required tools
+        run: |
+          brew install make ldid wget zip cmake
 
       - name: Build for ${{ matrix.platform_name }}
         run: |
           export PATH=/usr/local/bin:$PATH
-          export RUNNER=1 SLIMMED=1
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
+          export RUNNER=1
+          export SLIMMED=1
+          make -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
 
       - name: Upload regular ipa
         uses: actions/upload-artifact@v4
