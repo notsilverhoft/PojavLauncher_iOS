@@ -51,7 +51,7 @@ jobs:
 
       - name: Cache gl4es
         uses: actions/cache@v3
-        if: false # still disabled; enable if needed
+        if: false
         id: gl4es-cache
         with:
           path: gl4es/libs
@@ -78,38 +78,29 @@ jobs:
           cmake --build build --config RelWithDebInfo --target GL
           cp -R lib/libGL.dylib ../Natives/resources/Frameworks/libgl4es_114.dylib
 
-      - name: Push gl4es
-        if: false && github.event_name != 'pull_request' && github.ref_name == 'main' && steps.gl4es-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
+      - name: Download and set up JDK 8
         run: |
-          git add Natives/resources/Frameworks/libgl4es_114.dylib
-          git commit -am "CI: Update gl4es"
-          git push
+          mkdir -p depends
+          curl -L -o depends/jdk8.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u362-b09/OpenJDK8U-jdk_x64_mac_hotspot_8u362b09.tar.gz
+          tar -xzf depends/jdk8.tar.gz -C depends/
+          JDK_DIR=$(find depends -maxdepth 1 -type d -name "jdk8u*" | head -n 1)
+          mv "$JDK_DIR" depends/java-8-openjdk
+          echo "BOOTJDK=$(pwd)/depends/java-8-openjdk/bin" >> $GITHUB_ENV
+          echo "$(pwd)/depends/java-8-openjdk/bin" >> $GITHUB_PATH
 
-      - name: Get JRE8
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: success
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: jre8-ios-jitjailed
-          name: jre8-ios-aarch64
+      - name: Check JDK 8 version
+        run: |
+          echo "BOOTJDK: $BOOTJDK"
+          $BOOTJDK/javac -version
 
-      - name: Get JRE17
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: build.yml
-          path: depends
-          workflow_conclusion: success
-          repo: PojavLauncherTeam/android-openjdk-build-multiarch
-          branch: buildjre17
-          name: jre17-ios-aarch64
+      - name: Download JRE17
+        run: |
+          mkdir -p depends
+          curl -L -o depends/jre17.tar.xz https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ca01427/jre17-arm64-20220817-release.tar.xz
+          tar -xJf depends/jre17.tar.xz -C depends/
 
-      - name: Install gmake (GNU make)
-        run: brew install gmake
+      - name: Install make (GNU Make)
+        run: brew install make
 
       - name: Build for ${{ matrix.platform_name }}
         run: |
@@ -118,19 +109,19 @@ jobs:
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
 
       - name: Upload regular ipa
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: net.kdt.pojavlauncher-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload slimmed ipa
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: net.kdt.pojavlauncher.slimmed-${{ matrix.platform_name }}.ipa
           path: artifacts/net.kdt.pojavlauncher.slimmed-*-${{ matrix.platform_name }}.ipa
 
       - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: PojavLauncher.dSYM
           path: artifacts/PojavLauncher.dSYM
