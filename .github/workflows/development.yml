@@ -78,12 +78,14 @@ jobs:
           cmake --build build --config RelWithDebInfo --target GL
           cp -R lib/libGL.dylib ../Natives/resources/Frameworks/libgl4es_114.dylib
 
-      - name: Download JRE8
+      - name: Download JDK8
         run: |
-          mkdir -p depends
-          curl -L -o depends/jre8.tar.xz https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre8-40df388/jre8-arm64-20220811-release.tar.xz
-          tar -xJf depends/jre8.tar.xz -C depends/
-
+         mkdir -p depends
+         curl -L -o depends/jdk8.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u412-b08/OpenJDK8U-jdk_x64_mac_hotspot_8u412b08.tar.gz
+         tar -xzf depends/jdk8.tar.gz -C depends/
+         echo "JAVA_HOME=$(pwd)/depends/$(ls depends | grep jdk)" >> $GITHUB_ENV
+         echo "$(pwd)/depends/$(ls depends | grep jdk)/bin" >> $GITHUB_PATH
+   
       - name: Download JRE17
         run: |
           mkdir -p depends
