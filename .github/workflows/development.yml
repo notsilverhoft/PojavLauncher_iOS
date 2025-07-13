@@ -1,4 +1,4 @@
-name: Development build
+seename: Development build
 
 on:
   pull_request:
@@ -87,7 +87,7 @@ jobs:
       - name: Download JRE17
         run: |
           mkdir -p depends
-          curl -L -o depends/jre17.tar.xz https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-20240121/jre17-aarch64-20240121-release.tar.xz
+          curl -L -o depends/jre17.tar.xz https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ca01427/jre17-arm64-20220817-release.tar.xz
           tar -xJf depends/jre17.tar.xz -C depends/
 
       - name: Install gmake (GNU make)
