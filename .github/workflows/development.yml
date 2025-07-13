@@ -78,13 +78,14 @@ jobs:
           cmake --build build --config RelWithDebInfo --target GL
           cp -R lib/libGL.dylib ../Natives/resources/Frameworks/libgl4es_114.dylib
 
-      - name: Download JDK8
+      - name: Download and set up JDK 8
         run: |
          mkdir -p depends
          curl -L -o depends/jdk8.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u412-b08/OpenJDK8U-jdk_x64_mac_hotspot_8u412b08.tar.gz
          tar -xzf depends/jdk8.tar.gz -C depends/
-         echo "JAVA_HOME=$(pwd)/depends/$(ls depends | grep jdk)" >> $GITHUB_ENV
-         echo "$(pwd)/depends/$(ls depends | grep jdk)/bin" >> $GITHUB_PATH
+         JDK_DIR=$(find depends -maxdepth 1 -type d -name "jdk8u*" | head -n 1)
+         echo "JAVA_HOME=$(pwd)/$JDK_DIR" >> $GITHUB_ENV
+         echo "$(pwd)/$JDK_DIR/bin" >> $GITHUB_PATH
    
       - name: Download JRE17
         run: |
