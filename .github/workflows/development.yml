@@ -80,27 +80,27 @@ jobs:
 
       - name: Download and set up JDK 8
         run: |
-         mkdir -p depends
-         curl -L -o depends/jdk8.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u412-b08/OpenJDK8U-jdk_x64_mac_hotspot_8u412b08.tar.gz
-         tar -xzf depends/jdk8.tar.gz -C depends/
-         JDK_DIR=$(find depends -maxdepth 1 -type d -name "jdk8u*" | head -n 1)
-         echo "JAVA_HOME=$(pwd)/$JDK_DIR" >> $GITHUB_ENV
-         echo "$(pwd)/$JDK_DIR/bin" >> $GITHUB_PATH
-   
+          mkdir -p depends
+          curl -L -o depends/jdk8.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u412-b08/OpenJDK8U-jdk_x64_mac_hotspot_8u412b08.tar.gz
+          tar -xzf depends/jdk8.tar.gz -C depends/
+          JDK_DIR=$(find depends -maxdepth 1 -type d -name "jdk8u*" | head -n 1)
+          echo "JAVA_HOME=$(pwd)/$JDK_DIR" >> $GITHUB_ENV
+          echo "$(pwd)/$JDK_DIR/bin" >> $GITHUB_PATH
+
       - name: Download JRE17
         run: |
           mkdir -p depends
           curl -L -o depends/jre17.tar.xz https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ca01427/jre17-arm64-20220817-release.tar.xz
           tar -xJf depends/jre17.tar.xz -C depends/
 
-      - name: Install gmake (GNU make)
+      - name: Install make (GNU Make)
         run: brew install make
 
       - name: Build for ${{ matrix.platform_name }}
         run: |
           export PATH=/usr/local/bin:$PATH
           export RUNNER=1 SLIMMED=1
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
+          make -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }}
 
       - name: Upload regular ipa
         uses: actions/upload-artifact@v4
