@@ -91,7 +91,7 @@ jobs:
           tar -xJf depends/jre17.tar.xz -C depends/
 
       - name: Install gmake (GNU make)
-        run: brew install gmake
+        run: brew install make
 
       - name: Build for ${{ matrix.platform_name }}
         run: |
